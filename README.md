@@ -15,7 +15,7 @@
 [![WeChat](https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white)](./COMMUNICATION.md)
 [![中文文档](https://img.shields.io/badge/文档-中文版-F5C6C6?style=flat)](./README_CN.md)
 
-One Command to Evolve All Your AI Agents: OpenClaw, nanobot, Claude Code, Codex, Cursor and etc.
+**One Command to Evolve All Your AI Agents**: OpenClaw, nanobot, Claude Code, Codex, Cursor and etc.
 
 </div>
 
