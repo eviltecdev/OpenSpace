@@ -5,7 +5,7 @@ from .transport.connector import ShellConnector
 from .transport.local_connector import LocalShellConnector
 from openspace.config import get_config
 from openspace.config.utils import get_config_value
-from openspace.platform.config import get_local_server_config
+from openspace.platforms.config import get_local_server_config
 from openspace.utils.logging import Logger
 
 logger = Logger.get_logger(__name__)

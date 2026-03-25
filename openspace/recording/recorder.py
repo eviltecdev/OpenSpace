@@ -23,7 +23,7 @@ class TrajectoryRecorder:
         Args:
             task_name: task name (optional, will be saved in metadata)
             log_dir: log directory
-            enable_screenshot: whether to save screenshots (through platform.ScreenshotClient)
+            enable_screenshot: whether to save screenshots (through platforms.ScreenshotClient)
             enable_video: whether to enable video recording (through platform.RecordingClient)
             server_url: local_server address (None = read from config/environment variables)
         """
@@ -91,7 +91,7 @@ class TrajectoryRecorder:
             parameters: tool parameters
             screenshot: screenshot bytes (if provided)
             extra: extra information (e.g. server field for MCP)
-            auto_screenshot: whether to automatically capture screenshot (through platform.ScreenshotClient)
+            auto_screenshot: whether to automatically capture screenshot (through platforms.ScreenshotClient)
         """
         self.step_counter += 1
         step_num = self.step_counter
@@ -145,9 +145,9 @@ class TrajectoryRecorder:
         return step_info
     
     async def _capture_screenshot(self) -> Optional[bytes]:
-        """Capture screenshot automatically through platform.ScreenshotClient"""
+        """Capture screenshot automatically through platforms.ScreenshotClient"""
         try:
-            from openspace.platform import ScreenshotClient
+            from openspace.platforms import ScreenshotClient
             
             # Lazy initialization screenshot client
             if not hasattr(self, '_screenshot_client'):

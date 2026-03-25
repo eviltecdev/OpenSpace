@@ -375,7 +375,7 @@ If you already have the exact command/script to run, use run_shell instead."""
                 
                 if base_url is not None:
                     try:
-                        from openspace.platform import SystemInfoClient
+                        from openspace.platforms import SystemInfoClient
                         
                         async with SystemInfoClient(base_url=base_url, timeout=5) as client:
                             info = await client.get_system_info(use_cache=False)

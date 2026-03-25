@@ -500,7 +500,7 @@ class RecordingManager:
             
             # create video client (internal management)
             if self.enable_video:
-                from openspace.platform import RecordingClient
+                from openspace.platforms import RecordingClient
                 self._recording_client = RecordingClient(base_url=self.server_url)
                 success = await self._recording_client.start_recording()
                 if success:
@@ -510,7 +510,7 @@ class RecordingManager:
             
             # create screenshot client (internal management)
             if self.enable_screenshot:
-                from openspace.platform import ScreenshotClient
+                from openspace.platforms import ScreenshotClient
                 self._screenshot_client = ScreenshotClient(base_url=self.server_url)
                 logger.debug("Screenshot client ready")
             
@@ -539,7 +539,7 @@ class RecordingManager:
     async def _check_server_availability(self):
         """Check if local server is available"""
         try:
-            from openspace.platform import SystemInfoClient
+            from openspace.platforms import SystemInfoClient
 
             # Use context manager to ensure aiohttp session is closed, avoiding warning of unclosed session
             async with SystemInfoClient(base_url=self.server_url) as client:

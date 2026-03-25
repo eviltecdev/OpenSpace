@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from openspace.agents.base import BaseAgent
 from openspace.grounding.core.types import BackendType, ToolResult
-from openspace.platform.screenshot import ScreenshotClient
+from openspace.platforms.screenshot import ScreenshotClient
 from openspace.prompts import GroundingAgentPrompts
 from openspace.utils.logging import Logger
 

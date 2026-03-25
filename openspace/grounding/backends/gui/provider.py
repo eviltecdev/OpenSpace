@@ -4,7 +4,7 @@ from openspace.grounding.core.provider import Provider
 from openspace.grounding.core.session import BaseSession
 from openspace.config import get_config
 from openspace.config.utils import get_config_value
-from openspace.platform import get_local_server_config
+from openspace.platforms import get_local_server_config
 from openspace.utils.logging import Logger
 from .transport.connector import GUIConnector
 from .transport.local_connector import LocalGUIConnector

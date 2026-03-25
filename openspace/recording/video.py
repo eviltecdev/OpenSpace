@@ -1,7 +1,7 @@
 """
 Video Recorder
 
-Communicates with local_server through platform.RecordingClient
+Communicates with local_server through platforms.RecordingClient
 Supports local and remote recording (through configuration LOCAL_SERVER_URL)
 """
 
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from openspace.utils.logging import Logger
-from openspace.platform import RecordingClient
+from openspace.platforms import RecordingClient
 
 logger = Logger.get_logger(__name__)
 
