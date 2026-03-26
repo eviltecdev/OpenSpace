@@ -579,11 +579,18 @@ async def search_skills(
         if not q:
             return _json_ok({"results": [], "count": 0})
 
-        # Resolve local skills + store
+        # Re-scan host skill directories so newly created skills are searchable.
         local_skills = None
         store = None
         if source in ("all", "local"):
             openspace = await _get_openspace()
+
+            host_skill_dirs_raw = os.environ.get("OPENSPACE_HOST_SKILL_DIRS", "")
+            if host_skill_dirs_raw:
+                env_dirs = [d.strip() for d in host_skill_dirs_raw.split(",") if d.strip()]
+                if env_dirs:
+                    await _auto_register_skill_dirs(env_dirs)
+
             registry = openspace._skill_registry
             if registry:
                 local_skills = registry.list_skills()
