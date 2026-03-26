@@ -259,16 +259,13 @@ def _read_upload_meta(skill_dir: Path) -> Dict[str, Any]:
 async def _auto_register_skill_dirs(skill_dirs: List[str]) -> int:
     """Register bot skill directories into OpenSpace's SkillRegistry + DB.
 
-    Called automatically by ``execute_task`` when ``skill_dirs`` is provided.
-    Already-registered directories are skipped (idempotent within a session).
+    Called automatically by ``execute_task`` on every invocation. Directories
+    are re-scanned each time so that skills created by the host bot since the last call are discovered immediately.
     """
     global _registered_skill_dirs
 
-    new_dirs = [
-        Path(d) for d in skill_dirs
-        if d not in _registered_skill_dirs and Path(d).is_dir()
-    ]
-    if not new_dirs:
+    valid_dirs = [Path(d) for d in skill_dirs if Path(d).is_dir()]
+    if not valid_dirs:
         return 0
 
     openspace = await _get_openspace()
@@ -277,19 +274,21 @@ async def _auto_register_skill_dirs(skill_dirs: List[str]) -> int:
         logger.warning("_auto_register_skill_dirs: SkillRegistry not initialized")
         return 0
 
-    added = registry.discover_from_dirs(new_dirs)
+    added = registry.discover_from_dirs(valid_dirs)
 
     db_created = 0
     if added:
         store = _get_store()
         db_created = await store.sync_from_registry(added)
 
+    is_first = any(d not in _registered_skill_dirs for d in skill_dirs)
     for d in skill_dirs:
         _registered_skill_dirs.add(d)
 
     if added:
+        action = "Auto-registered" if is_first else "Re-scanned & found"
         logger.info(
-            f"Auto-registered {len(added)} skill(s) from {len(new_dirs)} dir(s), "
+            f"{action} {len(added)} skill(s) from {len(valid_dirs)} dir(s), "
             f"{db_created} new DB record(s)"
         )
     return len(added)
@@ -495,8 +494,9 @@ async def execute_task(
         workspace_dir: Working directory. Defaults to OPENSPACE_WORKSPACE env.
         max_iterations: Max agent iterations (default: 20).
         skill_dirs: Bot's skill directories to auto-register so OpenSpace
-                    can select and track them.  Already-registered dirs are
-                    silently skipped.
+                    can select and track them.  Directories are re-scanned
+                    on every call to discover skills created since the last
+                    invocation.
         search_scope: Skill search scope before execution.
                       "all" (default) — local + cloud; falls back to local
                       if no API key is configured.
@@ -505,7 +505,15 @@ async def execute_task(
     try:
         openspace = await _get_openspace()
 
-        # Auto-register bot skill directories
+        # Re-scan host skill directories (from env) to pick up skills
+        # created by the host bot since the last call.
+        host_skill_dirs_raw = os.environ.get("OPENSPACE_HOST_SKILL_DIRS", "")
+        if host_skill_dirs_raw:
+            env_dirs = [d.strip() for d in host_skill_dirs_raw.split(",") if d.strip()]
+            if env_dirs:
+                await _auto_register_skill_dirs(env_dirs)
+
+        # Auto-register bot skill directories (from call parameter)
         if skill_dirs:
             await _auto_register_skill_dirs(skill_dirs)
 

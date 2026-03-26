@@ -17,6 +17,8 @@
 
 **One Command to Evolve All Your AI Agents**: OpenClaw, nanobot, Claude Code, Codex, Cursor and etc.
 
+<img src="assets/cli-typing.gif" width="500px" alt="openspace --query your task">
+
 </div>
 
 ---
