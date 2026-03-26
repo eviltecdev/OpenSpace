@@ -652,10 +652,15 @@ class SkillEvolver:
                 return bool(data.get("proceed", False))
         except (json.JSONDecodeError, ValueError):
             pass
-        # Fallback: look for keywords
-        if any(w in response for w in ("\"proceed\": true", "proceed: true", "yes", "confirm")):
+        # Fallback: look for keywords (use word boundaries to avoid
+        # false positives from substrings like "know" matching "no")
+        _wb = re.search  # shorthand
+        if any(w in response for w in ("\"proceed\": true", "proceed: true")) \
+                or _wb(r"\byes\b", response) or _wb(r"\bconfirm\b", response):
             return True
-        if any(w in response for w in ("\"proceed\": false", "proceed: false", "no", "reject", "skip")):
+        if any(w in response for w in ("\"proceed\": false", "proceed: false")) \
+                or _wb(r"\bno\b", response) or _wb(r"\breject\b", response) \
+                or _wb(r"\bskip\b", response):
             return False
         # Default: skip — ambiguous response should not trigger costly evolution
         logger.debug("LLM confirmation response was ambiguous, defaulting to skip")
