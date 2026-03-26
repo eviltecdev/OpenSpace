@@ -234,6 +234,14 @@ class Logger:
             cls._configured = True
 
     @classmethod
+    def set_level(cls, level: str) -> None:
+        """Set log level by name (e.g. ``"DEBUG"``, ``"INFO"``, ``"WARNING"``)."""
+        resolved = getattr(logging, level.upper(), None)
+        if resolved is None or not isinstance(resolved, int):
+            raise ValueError(f"Unknown log level: {level!r}")
+        cls.configure(level=resolved, force=True)
+
+    @classmethod
     def set_debug(cls, debug_level: int = 2) -> None:
         """Dynamically switch debug level: 0 = WARNING, 1 = INFO, 2 = DEBUG."""
         global OPENSPACE_DEBUG
