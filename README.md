@@ -144,6 +144,15 @@ pip install -e .
 openspace-mcp --help   # verify installation
 ```
 
+> [!TIP]
+> **Slow clone?** The `assets/` folder (~50 MB of images) makes the default clone large. Use this lightweight alternative to skip it:
+> ```bash
+> git clone --filter=blob:none --sparse https://github.com/HKUDS/OpenSpace.git
+> cd OpenSpace
+> git sparse-checkout set '/*' '!assets/'
+> pip install -e .
+> ```
+
 **Choose your path:**
 - **[Path A](#-path-a-for-your-agent)** — Plug OpenSpace into your agent
 - **[Path B](#-path-b-as-your-co-worker)** — Use OpenSpace directly as your AI co-worker

@@ -144,6 +144,15 @@ pip install -e .
 openspace-mcp --help   # 验证安装
 ```
 
+> [!TIP]
+> **Clone 太慢？** `assets/` 目录包含约 50 MB 的图片文件，导致仓库较大。使用以下轻量方式跳过它：
+> ```bash
+> git clone --filter=blob:none --sparse https://github.com/HKUDS/OpenSpace.git
+> cd OpenSpace
+> git sparse-checkout set '/*' '!assets/'
+> pip install -e .
+> ```
+
 **选择你的路径：**
 - **[路径 A](#-路径-a为你的-agent-接入)** — 将 OpenSpace 接入你的 Agent
 - **[路径 B](#-路径-b作为你的-ai-协作者)** — 直接使用 OpenSpace 作为你的 AI 协作者
