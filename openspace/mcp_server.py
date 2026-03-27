@@ -75,11 +75,26 @@ class _MCPSafeStdout:
     def seekable(self):
         return False
 
-_real_stdout = sys.stdout
-sys.stdout = _MCPSafeStdout(_real_stdout, sys.stderr)
+    def __getattr__(self, name):
+        return getattr(self._stderr, name)
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+_real_stdout = sys.stdout
+
+# Windows pipe buffers are small. When using stdio MCP transport,
+# the parent process only reads stdout for MCP messages and does NOT
+# drain stderr. Heavy log/print output during execute_task fills the stderr
+# pipe buffer, blocking this process on write() → deadlock → timeout.
+# Redirect stderr to a log file on Windows to prevent this.
+if os.name == "nt":
+    _stderr_file = open(
+        _LOG_DIR / "mcp_stderr.log", "a", encoding="utf-8", buffering=1
+    )
+    sys.stderr = _stderr_file
+
+sys.stdout = _MCPSafeStdout(_real_stdout, sys.stderr)
 
 logging.basicConfig(
     level=logging.INFO,
