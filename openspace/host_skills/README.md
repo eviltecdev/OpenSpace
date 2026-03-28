@@ -48,12 +48,14 @@ cp -r host_skills/delegate-task/ /path/to/nanobot/nanobot/skills/
 
 ## Setup for openclaw
 
-openclaw ships with a built-in `skills/openspace/` skill — **no need to copy host_skills**.
+### 1. Copy host skills
 
-> [!NOTE]
-> openclaw's built-in skill merges skill-discovery + delegate-task into a single SKILL.md with scenario sub-pages. It uses `mcporter call openspace.<tool>` syntax. The underlying MCP tools are identical.
+```bash
+cp -r host_skills/skill-discovery/ /path/to/openclaw/skills/
+cp -r host_skills/delegate-task/ /path/to/openclaw/skills/
+```
 
-### 1. Register MCP server
+### 2. Register MCP server
 
 openclaw uses [mcporter](https://github.com/steipete/mcporter) as its MCP runtime:
 
@@ -61,9 +63,21 @@ openclaw uses [mcporter](https://github.com/steipete/mcporter) as its MCP runtim
 mcporter config add openspace --command "openspace-mcp"
 ```
 
-### 2. Configure env vars
+### 3. Configure env vars
 
-Set in `~/.openclaw/openclaw.json`:
+You can pass env vars directly when registering the MCP server in step 2, combining both steps into one command:
+
+```bash
+mcporter config add openspace --command "openspace-mcp" \
+  --env OPENSPACE_HOST_SKILL_DIRS=/path/to/openclaw/skills \
+  --env OPENSPACE_WORKSPACE=/path/to/OpenSpace \
+  --env OPENSPACE_API_KEY=sk-xxx
+```
+
+> [!TIP]
+> If you already ran step 2 without `--env`, you can re-run the command above to update the registration.
+
+Alternatively, if you prefer to keep env vars separate from the mcporter registration, set them in `~/.openclaw/openclaw.json` (openclaw will pass them to the MCP server at launch time):
 
 ```json
 {
@@ -80,8 +94,6 @@ Set in `~/.openclaw/openclaw.json`:
   }
 }
 ```
-
-Or set as system env vars (e.g. `~/.openclaw/.env`).
 
 ---
 
