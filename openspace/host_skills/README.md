@@ -55,44 +55,15 @@ cp -r host_skills/skill-discovery/ /path/to/openclaw/skills/
 cp -r host_skills/delegate-task/ /path/to/openclaw/skills/
 ```
 
-### 2. Register MCP server
+### 2. Register MCP server with env vars
 
-openclaw uses [mcporter](https://github.com/steipete/mcporter) as its MCP runtime:
-
-```bash
-mcporter config add openspace --command "openspace-mcp"
-```
-
-### 3. Configure env vars
-
-You can pass env vars directly when registering the MCP server in step 2, combining both steps into one command:
+openclaw uses [mcporter](https://github.com/steipete/mcporter) as its MCP runtime. Register the server and pass env vars in one command:
 
 ```bash
 mcporter config add openspace --command "openspace-mcp" \
   --env OPENSPACE_HOST_SKILL_DIRS=/path/to/openclaw/skills \
   --env OPENSPACE_WORKSPACE=/path/to/OpenSpace \
   --env OPENSPACE_API_KEY=sk-xxx
-```
-
-> [!TIP]
-> If you already ran step 2 without `--env`, you can re-run the command above to update the registration.
-
-Alternatively, if you prefer to keep env vars separate from the mcporter registration, set them in `~/.openclaw/openclaw.json` (openclaw will pass them to the MCP server at launch time):
-
-```json
-{
-  "skills": {
-    "entries": {
-      "openspace": {
-        "env": {
-          "OPENSPACE_HOST_SKILL_DIRS": "/path/to/openclaw/skills",
-          "OPENSPACE_WORKSPACE": "/path/to/OpenSpace",
-          "OPENSPACE_API_KEY": "sk-xxx"
-        }
-      }
-    }
-  }
-}
 ```
 
 ---
