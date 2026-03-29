@@ -544,7 +544,19 @@ OpenSpace builds upon the following open-source projects. We sincerely thank the
 
 <div align="center">
 
-**🌟 Star us if OpenSpace helps your agent!**
+## ⭐ Star History
+
+If you find OpenSpace helpful, please consider giving us a star! ⭐
+
+<div align="center">
+  <a href="https://star-history.com/#HKUDS/OpenSpace&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/OpenSpace&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/OpenSpace&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=HKUDS/OpenSpace&type=Date" />
+    </picture>
+  </a>
+</div>
 
 **🧬 Make You Agent Self-Evolve · 🌐 A Community That Grows Together · 💰 Fewer Tokens, Smarter Agents**
 
