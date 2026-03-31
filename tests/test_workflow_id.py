@@ -28,27 +28,42 @@ class TestWorkflowId:
             id_b = dashboard_server._workflow_id(wf_b)
 
         assert id_a != id_b
-        assert "task1" in id_a
-        assert "task1" in id_b
+        assert id_a.startswith("task1_")
+        assert id_b.startswith("task1_")
 
-    def test_nested_workflow_id_includes_path(self, tmp_path):
+    def test_id_contains_dir_name_and_hash(self, tmp_path):
         root = tmp_path / "root"
-        wf = root / "sub" / "deep" / "task1"
+        wf = root / "my-task"
         _make_workflow(wf)
 
         with patch.object(dashboard_server, "WORKFLOW_ROOTS", [root]):
             wf_id = dashboard_server._workflow_id(wf)
 
-        assert wf_id == "root__sub__deep__task1"
+        assert wf_id.startswith("my-task_")
+        assert len(wf_id) == len("my-task_") + 8  # 8-char hex hash
 
-    def test_workflow_outside_roots_falls_back_to_name(self, tmp_path):
+    def test_separator_collision_produces_different_ids(self, tmp_path):
+        """Regression: a dir named 'a__b' must not collide with path a/b."""
+        root = tmp_path / "root"
+        flat = root / "a__b"
+        nested = root / "a" / "b"
+        _make_workflow(flat)
+        _make_workflow(nested)
+
+        with patch.object(dashboard_server, "WORKFLOW_ROOTS", [root]):
+            id_flat = dashboard_server._workflow_id(flat)
+            id_nested = dashboard_server._workflow_id(nested)
+
+        assert id_flat != id_nested
+
+    def test_workflow_outside_roots_still_works(self, tmp_path):
         wf = tmp_path / "orphan_workflow"
         _make_workflow(wf)
 
         with patch.object(dashboard_server, "WORKFLOW_ROOTS", []):
             wf_id = dashboard_server._workflow_id(wf)
 
-        assert wf_id == "orphan_workflow"
+        assert wf_id.startswith("orphan_workflow_")
 
 
 class TestDiscoverWorkflowDirs:

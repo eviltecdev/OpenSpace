@@ -420,15 +420,15 @@ def _build_lineage_payload(skill_id: str, store: SkillStore) -> Dict[str, Any]:
 
 
 def _workflow_id(workflow_dir: Path) -> str:
-    """Stable short ID for a workflow directory, unique across roots."""
-    resolved = workflow_dir.resolve()
-    for root in WORKFLOW_ROOTS:
-        try:
-            rel = resolved.relative_to(root.resolve())
-            return f"{root.name}__{'__'.join(rel.parts)}"
-        except ValueError:
-            continue
-    return workflow_dir.name
+    """Stable short ID for a workflow directory, unique across roots.
+
+    Uses a hash suffix derived from the resolved path to avoid collisions
+    when directory names contain the separator character.
+    """
+    import hashlib
+    resolved = str(workflow_dir.resolve())
+    path_hash = hashlib.sha256(resolved.encode()).hexdigest()[:8]
+    return f"{workflow_dir.name}_{path_hash}"
 
 
 def _discover_workflow_dirs() -> List[Path]:
