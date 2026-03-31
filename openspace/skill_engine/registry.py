@@ -299,8 +299,8 @@ class SkillRegistry:
             skill_dir: Path to a directory containing ``SKILL.md``.
 
         Returns:
-            :class:`SkillMeta` if newly registered, ``None`` if already
-            present, the directory is invalid, or the skill fails safety checks.
+            :class:`SkillMeta` if newly registered or already present,
+            ``None`` if the directory is invalid or the skill fails safety checks.
         """
         skill_file = skill_dir / "SKILL.md"
         if not skill_file.exists():
