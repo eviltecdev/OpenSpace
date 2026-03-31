@@ -340,7 +340,11 @@ class OpenSpaceClient:
         record_data = self.fetch_record(skill_id)
         skill_name = record_data.get("name", skill_id)
 
-        skill_dir = target_dir / skill_name
+        if "/" in skill_name or "\\" in skill_name or skill_name.startswith("."):
+            skill_name = skill_id
+        skill_dir = (target_dir / skill_name).resolve()
+        if not skill_dir.is_relative_to(target_dir.resolve()):
+            raise CloudError(f"Skill name {skill_name!r} escapes target directory")
 
         # Check if already exists locally
         if skill_dir.exists() and (skill_dir / SKILL_FILENAME).exists():
@@ -401,6 +405,7 @@ class OpenSpaceClient:
     def _extract_zip(zip_data: bytes, target_dir: Path) -> List[str]:
         """Extract zip bytes to target directory with path traversal protection."""
         extracted: List[str] = []
+        resolved_target = target_dir.resolve()
         try:
             with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
                 for info in zf.infolist():
@@ -409,7 +414,9 @@ class OpenSpaceClient:
                     clean_name = Path(info.filename).as_posix()
                     if clean_name.startswith("..") or clean_name.startswith("/"):
                         continue
-                    target_path = target_dir / clean_name
+                    target_path = (target_dir / clean_name).resolve()
+                    if not target_path.is_relative_to(resolved_target):
+                        continue
                     target_path.parent.mkdir(parents=True, exist_ok=True)
                     target_path.write_bytes(zf.read(info))
                     extracted.append(clean_name)
