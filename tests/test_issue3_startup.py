@@ -116,3 +116,62 @@ Second local skill content.
         item["name"] == "Second Local Skill"
         for item in second_payload["results"]
     )
+
+
+@pytest.mark.asyncio
+async def test_local_search_returns_empty_when_no_registry(monkeypatch):
+    """source='local' with no discoverable skills should return empty, not crash."""
+
+    async def forbidden_get_openspace():
+        pytest.fail("_get_openspace should not run for source='local'")
+
+    monkeypatch.setattr(mcp_server, "_get_openspace", forbidden_get_openspace)
+    monkeypatch.setattr(mcp_server, "_get_local_skill_registry", lambda: None)
+    monkeypatch.setattr(
+        "openspace.cloud.embedding.generate_embedding",
+        lambda text, api_key=None: None,
+    )
+
+    response = await mcp_server.search_skills(
+        query="anything",
+        source="local",
+        limit=5,
+        auto_import=False,
+    )
+
+    payload = json.loads(response)
+    assert payload["count"] == 0
+    assert payload["results"] == []
+
+
+@pytest.mark.asyncio
+async def test_source_all_still_calls_get_openspace(monkeypatch, tmp_path):
+    """source='all' must go through _get_openspace(), not the lightweight path."""
+    called = {"openspace": False}
+
+    class FakeRegistry:
+        def list_skills(self):
+            return []
+
+    class FakeOpenSpace:
+        _skill_registry = FakeRegistry()
+
+    async def tracking_get_openspace():
+        called["openspace"] = True
+        return FakeOpenSpace()
+
+    monkeypatch.delenv("OPENSPACE_HOST_SKILL_DIRS", raising=False)
+    monkeypatch.setattr(mcp_server, "_get_openspace", tracking_get_openspace)
+    monkeypatch.setattr(
+        "openspace.cloud.embedding.generate_embedding",
+        lambda text, api_key=None: None,
+    )
+
+    await mcp_server.search_skills(
+        query="anything",
+        source="all",
+        limit=5,
+        auto_import=False,
+    )
+
+    assert called["openspace"], "source='all' should call _get_openspace()"
