@@ -239,7 +239,16 @@ class Logger:
         resolved = getattr(logging, level.upper(), None)
         if resolved is None or not isinstance(resolved, int):
             raise ValueError(f"Unknown log level: {level!r}")
-        cls.configure(level=resolved, force=True)
+        if not cls._configured:
+            cls.configure(level=resolved, attach_to_root=True)
+            return
+
+        root_logger = logging.getLogger()
+        root_logger.setLevel(resolved)
+        for handler in root_logger.handlers:
+            handler.setLevel(resolved)
+
+        cls._update_level(resolved)
 
     @classmethod
     def set_debug(cls, debug_level: int = 2) -> None:
