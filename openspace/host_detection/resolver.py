@@ -10,9 +10,100 @@ import json
 import logging
 import os
 import tempfile
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("openspace.host_detection")
+
+_DEFAULT_MODEL = "openrouter/anthropic/claude-sonnet-4.5"
+
+_PROVIDER_NATIVE_ENV_VARS: Dict[str, tuple[str, ...]] = {
+    "openrouter": ("OPENROUTER_API_KEY", "OR_API_KEY"),
+    "aihubmix": ("AIHUBMIX_API_KEY",),
+    "siliconflow": ("SILICONFLOW_API_KEY",),
+    "volcengine": ("VOLCENGINE_API_KEY", "ARK_API_KEY"),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "zhipu": ("ZHIPU_API_KEY",),
+    "dashscope": ("DASHSCOPE_API_KEY",),
+    "moonshot": ("MOONSHOT_API_KEY",),
+    "minimax": ("MINIMAX_API_KEY",),
+    "groq": ("GROQ_API_KEY",),
+}
+
+_env_loaded = False
+
+
+def _load_env_once() -> None:
+    """Load .env files once per process.
+
+    Search order (first-loaded wins for each key):
+      1. ``openspace/.env``  (package root — works regardless of CWD)
+      2. ``CWD/.env``        (project-level fallback)
+
+    Uses ``override=False`` so env vars already in the process (e.g. set
+    by the host agent or the shell) are never overwritten.
+    """
+    global _env_loaded
+    if _env_loaded:
+        return
+    _env_loaded = True
+
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+
+    pkg_env = Path(__file__).resolve().parent.parent / ".env"
+    if pkg_env.is_file():
+        load_dotenv(pkg_env)
+    load_dotenv()
+
+
+def _pick_first_env(names: tuple[str, ...]) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _infer_provider_name(model: str) -> Optional[str]:
+    """Infer the provider name from a model string using PROVIDER_REGISTRY."""
+    from openspace.host_detection.nanobot import PROVIDER_REGISTRY
+
+    model_lower = (model or "").lower()
+    model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
+    normalized_prefix = model_prefix.replace("-", "_")
+
+    for name, _keywords, _default_base in PROVIDER_REGISTRY:
+        if model_prefix and normalized_prefix == name:
+            return name
+
+    for name, keywords, _default_base in PROVIDER_REGISTRY:
+        if any(keyword in model_lower for keyword in keywords):
+            return name
+
+    return None
+
+
+def _has_provider_native_env(model: str) -> bool:
+    """Check if a provider-native API key (e.g. OPENROUTER_API_KEY) exists.
+
+    When True, the key from .env or the process environment is sufficient
+    for litellm to authenticate — no need to read nanobot / host config.
+    """
+    provider = _infer_provider_name(model)
+    if not provider:
+        return False
+
+    env_names = _PROVIDER_NATIVE_ENV_VARS.get(provider)
+    if not env_names:
+        return False
+
+    return bool(_pick_first_env(env_names))
 
 
 def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
@@ -27,47 +118,63 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
         OPENSPACE_LLM_EXTRA_HEADERS   → litellm ``extra_headers`` (JSON string)
         OPENSPACE_LLM_CONFIG          → arbitrary litellm kwargs (JSON string)
 
-    Tier 2 — Auto-detect from host agent config file::
+    Tier 2 — Provider-native env vars already present in the process
+    (including values loaded from ``openspace/.env``)::
 
-        ~/.nanobot/config.json      → providers.{matched}.apiKey / apiBase
+        OPENROUTER_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / ...
 
-    Tier 3 — Provider-native env vars inherited from the parent process
-    (e.g. ``OPENROUTER_API_KEY``).  Read by litellm automatically.
+        These take precedence over host-agent config so local/standalone
+        launches are not hijacked by unrelated host config files.
+
+    Tier 3 — Host-agent config file fallback (only when Tier 1+2 absent)::
+
+        nanobot  → ``~/.nanobot/config.json``
+        openclaw → ``~/.openclaw/openclaw.json``
 
     Returns:
         ``(resolved_model, llm_kwargs_dict)``
     """
-    from openspace.host_detection.nanobot import try_read_nanobot_config
+    _load_env_once()
 
     kwargs: Dict[str, Any] = {}
     resolved_model = model
     source = "inherited env"
 
-    # --- Tier 2: auto-detect from host config (filled first, may be overridden) ---
-    host_config = try_read_nanobot_config(model)
+    has_explicit_llm_override = bool(
+        os.environ.get("OPENSPACE_LLM_API_BASE")
+        or os.environ.get("OPENSPACE_LLM_API_KEY")
+    )
+    provider_native_env_used = _has_provider_native_env(
+        resolved_model or _DEFAULT_MODEL
+    )
+
+    # --- Tier 3: host config fallback (only when no local keys) ---
+    host_config = None
+    host_source = None
+    if not has_explicit_llm_override and not provider_native_env_used:
+        from openspace.host_detection.nanobot import try_read_nanobot_config
+        host_config = try_read_nanobot_config(model)
+        if host_config:
+            host_source = "nanobot config"
+        else:
+            from openspace.host_detection.openclaw import try_read_openclaw_config
+            host_config = try_read_openclaw_config(model)
+            if host_config:
+                host_source = "openclaw config"
+
     if host_config:
         host_model = host_config.pop("_model", None)
         forced_provider = host_config.pop("_forced_provider", None)
         if not resolved_model and host_model:
             resolved_model = host_model
-        # If the host config forces a gateway provider (e.g. openrouter)
-        # and the model name doesn't already carry that prefix, prepend
-        # it so that litellm uses the correct request format (OpenAI-
-        # compatible for gateways vs native for direct providers).
-        # Skip when the user explicitly provided a model (via OPENSPACE_MODEL
-        # or --model) AND explicit OPENSPACE_LLM_* overrides — the user knows
-        # exactly which endpoint they want to hit.
+
         _GATEWAY_PROVIDERS = {"openrouter", "aihubmix", "siliconflow"}
-        _has_explicit_llm_override = bool(
-            os.environ.get("OPENSPACE_LLM_API_BASE")
-            or os.environ.get("OPENSPACE_LLM_API_KEY")
-        )
         if (
             forced_provider
             and forced_provider in _GATEWAY_PROVIDERS
             and resolved_model
             and not resolved_model.lower().startswith(f"{forced_provider}/")
-            and not (model and _has_explicit_llm_override)
+            and not (model and has_explicit_llm_override)
         ):
             resolved_model = f"{forced_provider}/{resolved_model}"
             logger.info(
@@ -75,7 +182,7 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
                 resolved_model, forced_provider,
             )
         kwargs.update(host_config)
-        source = "nanobot config"
+        source = host_source or "host config"
 
     # --- Tier 1: explicit env vars override everything ---
     api_key = os.environ.get("OPENSPACE_LLM_API_KEY")
@@ -108,7 +215,7 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
 
     # Default model fallback
     if not resolved_model:
-        resolved_model = "openrouter/anthropic/claude-sonnet-4.5"
+        resolved_model = _DEFAULT_MODEL
 
     # Provider-specific adjustments for litellm routing
     if resolved_model and "minimax" in resolved_model.lower():
@@ -120,10 +227,6 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
         if final_base:
             os.environ.setdefault("MINIMAX_API_BASE", final_base)
 
-        # api.minimaxi.com (domestic) is OpenAI-compatible but does not fully
-        # support litellm's minimax-specific request transformations (e.g. tool
-        # calling format).  Switch to the generic openai/ prefix so litellm
-        # sends standard OpenAI-format requests that minimaxi.com accepts.
         if (
             resolved_model.lower().startswith("minimax/")
             and "minimaxi.com" in final_base
@@ -141,6 +244,11 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
             for k, v in kwargs.items()
         }
         logger.info("LLM kwargs resolved (source=%s): %s", source, safe)
+    elif provider_native_env_used:
+        logger.info(
+            "LLM credentials resolved from provider-native env for model=%r",
+            resolved_model,
+        )
 
     return resolved_model, kwargs
 
@@ -158,6 +266,8 @@ def build_grounding_config_path() -> Optional[str]:
     Returns:
         Path to the resolved config file, or None.
     """
+    _load_env_once()
+
     config_json_raw = os.environ.get("OPENSPACE_CONFIG_JSON", "").strip()
     overrides: Dict[str, Any] = {}
     if config_json_raw:
@@ -213,4 +323,3 @@ def build_grounding_config_path() -> Optional[str]:
             logger.warning("Failed to write config overrides: %s", e)
 
     return os.environ.get("OPENSPACE_CONFIG_PATH")
-

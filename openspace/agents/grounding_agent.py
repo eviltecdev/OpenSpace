@@ -749,6 +749,7 @@ class GroundingAgent(BaseAgent):
 
             # Use dedicated visual analysis model if configured, otherwise use main LLM model
             visual_model = self._visual_analysis_model or (self._llm_client.model if self._llm_client else "openrouter/anthropic/claude-sonnet-4.5")
+            _llm_extra = getattr(self._llm_client, 'litellm_kwargs', {}) if self._llm_client else {}
             response = await asyncio.wait_for(
                 litellm.acompletion(
                     model=visual_model,
@@ -756,7 +757,8 @@ class GroundingAgent(BaseAgent):
                         "role": "user",
                         "content": content
                     }],
-                    timeout=self._visual_analysis_timeout
+                    timeout=self._visual_analysis_timeout,
+                    **_llm_extra,
                 ),
                 timeout=self._visual_analysis_timeout + 5
             )

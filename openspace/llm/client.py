@@ -2,21 +2,15 @@ import litellm
 import json
 import asyncio
 import time
-from pathlib import Path
 from typing import List, Sequence, Union, Dict, Optional
-from dotenv import load_dotenv
 from openai.types.chat import ChatCompletionToolParam
 
 from openspace.grounding.core.types import ToolSchema, ToolResult, ToolStatus
 from openspace.grounding.core.tool import BaseTool
 from openspace.utils.logging import Logger
 
-# Load .env from openspace package root (works regardless of CWD),
-# then fall back to CWD/.env.  override=False (default) means first-loaded wins.
-_PKG_ENV = Path(__file__).resolve().parent.parent / ".env"  # openspace/.env
-if _PKG_ENV.is_file():
-    load_dotenv(_PKG_ENV)
-load_dotenv()  # also try CWD/.env for any remaining vars
+# .env loading is centralized in host_detection.resolver._load_env_once()
+# which is called by build_llm_kwargs / build_grounding_config_path.
 
 # Disable LiteLLM verbose logging to prevent stdout blocking with large tool schemas
 litellm.set_verbose = False
@@ -229,7 +223,8 @@ async def _summarize_tool_result(
     tool_name: str,
     task: str = "",
     model: str = "openrouter/anthropic/claude-sonnet-4.5",
-    timeout: float = 120.0
+    timeout: float = 120.0,
+    litellm_kwargs: Optional[Dict] = None,
 ) -> str:
     """Use LLM to summarize large tool results."""
     try:
@@ -265,11 +260,13 @@ Content:
 
 Concise summary:"""
         
+        _extra = litellm_kwargs or {}
         response = await asyncio.wait_for(
             litellm.acompletion(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                timeout=timeout
+                timeout=timeout,
+                **_extra,
             ),
             timeout=timeout + 5
         )
@@ -296,7 +293,8 @@ async def _tool_result_to_message_async(
     task: str = "",
     summarize_threshold: int = DEFAULT_SUMMARIZE_THRESHOLD_CHARS,
     summarize_model: str = "openrouter/anthropic/claude-sonnet-4.5",
-    enable_summarization: bool = True
+    enable_summarization: bool = True,
+    litellm_kwargs: Optional[Dict] = None,
 ) -> Dict:
     """Convert ToolResult to LLMClient usable message format with LLM summarization for large results.
 
@@ -325,7 +323,7 @@ async def _tool_result_to_message_async(
     
     # Use LLM summarization if content exceeds threshold
     if original_len > summarize_threshold and enable_summarization:
-        summary = await _summarize_tool_result(text_content, tool_name, task, summarize_model)
+        summary = await _summarize_tool_result(text_content, tool_name, task, summarize_model, litellm_kwargs=litellm_kwargs)
         if summary:
             text_content = summary
         elif original_len > MAX_TOOL_RESULT_CHARS:
@@ -833,7 +831,8 @@ class LLMClient:
                     task=user_task,
                     summarize_threshold=self.summarize_threshold_chars,
                     summarize_model=self.model,
-                    enable_summarization=self.enable_tool_result_summarization
+                    enable_summarization=self.enable_tool_result_summarization,
+                    litellm_kwargs=self.litellm_kwargs,
                 )
                 current_messages.append(tool_message)
                 

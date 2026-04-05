@@ -29,8 +29,8 @@ from openspace.host_detection.nanobot import (
 )
 from openspace.host_detection.openclaw import (
     get_openclaw_openai_api_key as _openclaw_get_openai_api_key,
-    is_openclaw_host,
     read_openclaw_skill_env,
+    try_read_openclaw_config,
 )
 
 logger = logging.getLogger("openspace.host_detection")
@@ -82,10 +82,8 @@ __all__ = [
     "build_grounding_config_path",
     "get_openai_api_key",
     "read_host_mcp_env",
-    # legacy re-exports
     "read_nanobot_mcp_env",
     "try_read_nanobot_config",
-    # openclaw-specific (for direct use if needed)
-    "is_openclaw_host",
     "read_openclaw_skill_env",
+    "try_read_openclaw_config",
 ]

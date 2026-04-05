@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,19 +36,31 @@ PROVIDER_REGISTRY: List[tuple] = [
     ("groq",        ("groq",),                         ""),
 ]
 
-NANOBOT_CONFIG_PATH = Path.home() / ".nanobot" / "config.json"
+
+def _resolve_nanobot_config_path() -> Path:
+    """Resolve the nanobot config path from env overrides or defaults."""
+    explicit = os.environ.get("NANOBOT_CONFIG_PATH", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+
+    state_dir = os.environ.get("NANOBOT_STATE_DIR", "").strip()
+    if state_dir:
+        return Path(state_dir).expanduser() / "config.json"
+
+    return Path.home() / ".nanobot" / "config.json"
 
 
 def _load_nanobot_config() -> Optional[Dict[str, Any]]:
-    """Load and parse ``~/.nanobot/config.json``.  Returns None on failure."""
-    if not NANOBOT_CONFIG_PATH.is_file():
+    """Load and parse nanobot config.json.  Returns None on failure."""
+    config_path = _resolve_nanobot_config_path()
+    if not config_path.is_file():
         return None
     try:
-        with open(NANOBOT_CONFIG_PATH, encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else None
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to read nanobot config %s: %s", NANOBOT_CONFIG_PATH, e)
+        logger.warning("Failed to read nanobot config %s: %s", config_path, e)
         return None
 
 
@@ -154,10 +167,11 @@ def try_read_nanobot_config(model: str) -> Optional[Dict[str, Any]]:
         result["_forced_provider"] = forced_provider
 
     if result:
+        config_path = _resolve_nanobot_config_path()
         logger.info(
             "Auto-detected LLM credentials from nanobot config (%s), "
             "provider matched for model=%r",
-            NANOBOT_CONFIG_PATH, match_model,
+            config_path, match_model,
         )
 
     return result
