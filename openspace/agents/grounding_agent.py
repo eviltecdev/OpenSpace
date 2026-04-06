@@ -187,15 +187,17 @@ class GroundingAgent(BaseAgent):
         recent_messages = conversation_messages[-(keep_recent * 2):] if conversation_messages else []
 
         truncated = system_messages.copy()
-        if user_instruction:
-            truncated.append(user_instruction)
         dropped = len(conversation_messages) - len(recent_messages)
         if dropped > 0:
             truncated.append({
-                "role": "user",
-                "content": f"[System: {dropped} earlier messages were truncated to save context. "
-                           f"The original task instruction is preserved above.]"
+                "role": "system",
+                "content": (
+                    f"{self._ITERATION_GUIDANCE_PREFIX} {dropped} earlier messages were "
+                    "truncated to save context. The original task instruction is preserved below."
+                ),
             })
+        if user_instruction:
+            truncated.append(user_instruction)
         truncated.extend(recent_messages)
         
         logger.info(f"After truncation: {len(truncated)} messages, "

@@ -153,10 +153,10 @@ def build_llm_kwargs(model: str) -> tuple[str, Dict[str, Any]]:
         resolved_model or _DEFAULT_MODEL
     )
 
-    # --- Tier 3: host config fallback (blocked only by provider-native env) ---
+    # --- Tier 3: host config fallback (only when no local keys) ---
     host_config = None
     host_source = None
-    if not provider_native_env_used:
+    if not has_explicit_llm_override and not provider_native_env_used:
         from openspace.host_detection.nanobot import try_read_nanobot_config
         host_config = try_read_nanobot_config(model)
         if host_config:
