@@ -137,7 +137,13 @@ async def _get_openspace():
 
         logger.info("Initializing OpenSpace engine ...")
         from openspace.tool_layer import OpenSpace, OpenSpaceConfig
-        from openspace.host_detection import build_llm_kwargs, build_grounding_config_path
+        from openspace.host_detection import (
+            build_grounding_config_path,
+            build_llm_kwargs,
+            load_runtime_env,
+        )
+
+        load_runtime_env()
 
         env_model = os.environ.get("OPENSPACE_MODEL", "")
         workspace = os.environ.get("OPENSPACE_WORKSPACE")

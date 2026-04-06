@@ -185,8 +185,17 @@ class GroundingAgent(BaseAgent):
                 conversation_messages.append(msg)
         
         recent_messages = conversation_messages[-(keep_recent * 2):] if conversation_messages else []
-        
+
         truncated = system_messages.copy()
+        dropped = len(conversation_messages) - len(recent_messages)
+        if dropped > 0:
+            truncated.append({
+                "role": "system",
+                "content": (
+                    f"{self._ITERATION_GUIDANCE_PREFIX} {dropped} earlier messages were "
+                    "truncated to save context. The original task instruction is preserved below."
+                ),
+            })
         if user_instruction:
             truncated.append(user_instruction)
         truncated.extend(recent_messages)
@@ -350,7 +359,7 @@ class GroundingAgent(BaseAgent):
                           f"Tool results: {len(tool_results_this_iteration)}, "
                           f"Content length: {len(assistant_content)} chars")
                 
-                if len(assistant_content) > 0:
+                if len(assistant_content.strip()) > 0:
                     logger.info(f"Iteration {current_iteration} - Assistant content preview: {repr(assistant_content[:300])}")
                     consecutive_empty_responses = 0  # Reset counter on valid response
                 else:
@@ -747,9 +756,19 @@ class GroundingAgent(BaseAgent):
                     }
                 })
 
-            # Use dedicated visual analysis model if configured, otherwise use main LLM model
+            # Resolve visual-model credentials independently when the visual
+            # model differs from the main reasoning model.
             visual_model = self._visual_analysis_model or (self._llm_client.model if self._llm_client else "openrouter/anthropic/claude-sonnet-4.5")
-            _llm_extra = getattr(self._llm_client, 'litellm_kwargs', {}) if self._llm_client else {}
+            _llm_extra = {}
+            if self._llm_client and visual_model == self._llm_client.model:
+                _llm_extra = getattr(self._llm_client, 'litellm_kwargs', {}) or {}
+            elif self._visual_analysis_model:
+                try:
+                    from openspace.host_detection import build_llm_kwargs
+                    visual_model, _llm_extra = build_llm_kwargs(visual_model)
+                except Exception as e:
+                    logger.debug(f"Failed to resolve dedicated visual model credentials: {e}")
+                    _llm_extra = {}
             response = await asyncio.wait_for(
                 litellm.acompletion(
                     model=visual_model,

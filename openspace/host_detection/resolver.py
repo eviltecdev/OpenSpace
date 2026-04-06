@@ -62,6 +62,11 @@ def _load_env_once() -> None:
     load_dotenv()
 
 
+def load_runtime_env() -> None:
+    """Public wrapper for one-time runtime .env loading."""
+    _load_env_once()
+
+
 def _pick_first_env(names: tuple[str, ...]) -> str:
     for name in names:
         value = os.environ.get(name, "").strip()

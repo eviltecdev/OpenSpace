@@ -9,8 +9,9 @@ from openspace.grounding.core.types import ToolSchema, ToolResult, ToolStatus
 from openspace.grounding.core.tool import BaseTool
 from openspace.utils.logging import Logger
 
-# .env loading is centralized in host_detection.resolver._load_env_once()
-# which is called by build_llm_kwargs / build_grounding_config_path.
+# .env loading is centralized in host_detection.resolver.load_runtime_env().
+# CLI/MCP entrypoints call it before reading startup env vars, and the
+# resolver helpers also call it defensively.
 
 # Disable LiteLLM verbose logging to prevent stdout blocking with large tool schemas
 litellm.set_verbose = False
@@ -169,9 +170,10 @@ def _infer_backend_from_tool_name(tool_name: str) -> Optional[str]:
     if not tool_name or not isinstance(tool_name, str):
         return None
     name = tool_name.strip()
-    # Dedup format: "server__toolname" -> use suffix
+    # Dedup format: "server__toolname" -> use suffix.
+    # Use rsplit to handle server names that themselves contain "__".
     if "__" in name:
-        name = name.split("__", 1)[-1]
+        name = name.rsplit("__", 1)[-1]
     shell_tools = {"shell_agent", "read_file", "write_file", "list_dir", "run_shell"}
     if name in shell_tools:
         return "shell"
