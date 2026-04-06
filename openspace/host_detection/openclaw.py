@@ -279,6 +279,13 @@ def get_openclaw_openai_api_key() -> Optional[str]:
     return None
 
 
+def is_openclaw_host() -> bool:
+    """Detect if the current environment is running under OpenClaw."""
+    if os.environ.get("OPENCLAW_STATE_DIR") or os.environ.get("OPENCLAW_CONFIG_PATH"):
+        return True
+    return _resolve_openclaw_config_path() is not None
+
+
 def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
     """Read LLM credentials from OpenClaw's env-style config blocks."""
     env_block = _get_openclaw_env("openspace")
@@ -304,6 +311,5 @@ def try_read_openclaw_config(model: str) -> Optional[Dict[str, Any]]:
         model,
     )
     return result
-
 
 

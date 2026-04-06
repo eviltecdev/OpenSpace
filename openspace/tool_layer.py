@@ -429,24 +429,15 @@ class OpenSpace:
                 execution_context_p1 = {**execution_context}
                 execution_context_p1["max_iterations"] = max_iterations
 
-                # Snapshot workspace files before skill-guided execution.
-                # Record names AND mtimes so cleanup only removes files
-                # that were actually created during the skill phase.
+                # Snapshot workspace files before skill-guided execution
                 workspace_path = execution_context.get("workspace_dir", "")
-                pre_skill_files: Dict[str, float] = {}
-                snapshot_time: float = 0.0
+                pre_skill_files: set = set()
                 if workspace_path:
                     try:
                         from pathlib import Path as _P
-                        import time as _time
-                        snapshot_time = _time.time()
-                        ws_p = _P(workspace_path)
-                        if ws_p.exists():
-                            for f in ws_p.iterdir():
-                                try:
-                                    pre_skill_files[f.name] = f.stat().st_mtime
-                                except OSError:
-                                    pre_skill_files[f.name] = 0.0
+                        pre_skill_files = {
+                            f.name for f in _P(workspace_path).iterdir()
+                        } if _P(workspace_path).exists() else set()
                     except Exception:
                         pass
 
@@ -487,21 +478,12 @@ class OpenSpace:
                             removed = 0
                             if ws.exists():
                                 for f in list(ws.iterdir()):
-                                    # Keep files that existed before skill phase
-                                    if f.name in pre_skill_files:
-                                        continue
-                                    # Keep files whose mtime predates the snapshot
-                                    # (created by external processes before we started)
-                                    try:
-                                        if snapshot_time and f.stat().st_mtime < snapshot_time:
-                                            continue
-                                    except OSError:
-                                        pass
-                                    if f.is_dir():
-                                        shutil.rmtree(f, ignore_errors=True)
-                                    else:
-                                        f.unlink(missing_ok=True)
-                                    removed += 1
+                                    if f.name not in pre_skill_files:
+                                        if f.is_dir():
+                                            shutil.rmtree(f, ignore_errors=True)
+                                        else:
+                                            f.unlink(missing_ok=True)
+                                        removed += 1
                             if removed:
                                 logger.info(
                                     f"[Phase 2 — Fallback] Cleaned {removed} artifact(s) "

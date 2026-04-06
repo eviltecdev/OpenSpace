@@ -754,9 +754,19 @@ class GroundingAgent(BaseAgent):
                     }
                 })
 
-            # Use dedicated visual analysis model if configured, otherwise use main LLM model
+            # Resolve visual-model credentials independently when the visual
+            # model differs from the main reasoning model.
             visual_model = self._visual_analysis_model or (self._llm_client.model if self._llm_client else "openrouter/anthropic/claude-sonnet-4.5")
-            _llm_extra = getattr(self._llm_client, 'litellm_kwargs', {}) if self._llm_client else {}
+            _llm_extra = {}
+            if self._llm_client and visual_model == self._llm_client.model:
+                _llm_extra = getattr(self._llm_client, 'litellm_kwargs', {}) or {}
+            elif self._visual_analysis_model:
+                try:
+                    from openspace.host_detection import build_llm_kwargs
+                    visual_model, _llm_extra = build_llm_kwargs(visual_model)
+                except Exception as e:
+                    logger.debug(f"Failed to resolve dedicated visual model credentials: {e}")
+                    _llm_extra = {}
             response = await asyncio.wait_for(
                 litellm.acompletion(
                     model=visual_model,

@@ -9,8 +9,9 @@ from openspace.grounding.core.types import ToolSchema, ToolResult, ToolStatus
 from openspace.grounding.core.tool import BaseTool
 from openspace.utils.logging import Logger
 
-# .env loading is centralized in host_detection.resolver._load_env_once()
-# which is called by build_llm_kwargs / build_grounding_config_path.
+# .env loading is centralized in host_detection.resolver.load_runtime_env().
+# CLI/MCP entrypoints call it before reading startup env vars, and the
+# resolver helpers also call it defensively.
 
 # Disable LiteLLM verbose logging to prevent stdout blocking with large tool schemas
 litellm.set_verbose = False

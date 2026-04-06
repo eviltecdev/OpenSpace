@@ -322,7 +322,13 @@ async def refresh_mcp_cache(config_path: Optional[str] = None):
 def _load_config(args) -> OpenSpaceConfig:
     """Load configuration"""
     import os
-    from openspace.host_detection import build_llm_kwargs, build_grounding_config_path
+    from openspace.host_detection import (
+        build_grounding_config_path,
+        build_llm_kwargs,
+        load_runtime_env,
+    )
+
+    load_runtime_env()
 
     cli_overrides = {}
     if args.max_iterations is not None:
