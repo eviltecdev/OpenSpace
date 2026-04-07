@@ -25,6 +25,9 @@
 
 ## 📢 最新动态
 
+- **2026-04-07** 🌐 OpenSpace MCP 新增独立 **SSE** 与 **streamable HTTP** 启动方式，便于远端 host 通过 HTTP 接入，绕过基于 stdio 的 MCP server timeout 瓶颈。具体接入方式见 [host integration 文档](openspace/host_skills/README.md)。
+- **2026-04-06** 🛠️ 修复多项运行时问题，覆盖 grounding、MCP 服务、skill 进化与持久化链路，长流程执行的稳定性与恢复能力进一步提升。
+- **2026-04-05** 🧭 LLM 凭证解析清理完成：统一 `.env` 加载逻辑，改进宿主配置自动识别，并让 provider 原生环境变量处理更一致。
 - **2026-04-03** 🚀 发布 **v0.1.0** — Skill 质量监控上线：从优质 Skill 中提取结构模式，每日自动评估所有新提交；云端搜索全面升级，匹配更准、响应更快；社区自发形成生产级垂直 Skill 集群。前端新增中文（zh）国际化支持。
 - **2026-04-02** ⚡ 云端搜索升级，提升匹配质量、降低响应延迟。
 - **2026-03-31** 🛡️ 安全加固：zip 解压与 `import_skill` 新增路径穿越防护；CLI 启动时读取 `OPENSPACE_MODEL` 及 `OPENSPACE_LLM_*` 环境变量；修复 MiniMax 兼容性问题与 workflow ID 冲突。
