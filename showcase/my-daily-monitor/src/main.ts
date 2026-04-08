@@ -18,6 +18,9 @@ import {
   QuickLinksPanel,
   DevOpsPanel,
   MapPanel,
+  VisionPanel,
+  SkillGraphPanel,
+  CostPanel,
   WorldClockPanel,
   InsightsPanel,
   WeatherPanel,
@@ -32,6 +35,7 @@ import { Panel } from './components/Panel';
 import { RefreshScheduler } from './services/refresh-scheduler';
 import { formatDate } from './utils';
 import { generateDailyBriefing } from './services/ai-summary';
+import { getPreferences } from './services/settings-store';
 
 // ============================================================
 //  Panel instances — organized by section
@@ -62,6 +66,10 @@ const monitorsPanel = new MyMonitorsPanel();
 // DevOps & System
 const devOpsPanel = new DevOpsPanel();
 const codeStatusPanel = new CodeStatusPanel();
+const costPanel = new CostPanel();
+const visionPanel = new VisionPanel();
+visionPanel.getElement().classList.add('span-2'); // needs height for the result area
+const skillGraphPanel = new SkillGraphPanel();
 
 // ============================================================
 //  Mount panels to single dense grid (grouped by affinity)
@@ -73,14 +81,16 @@ const grid = document.getElementById('panelsGrid')!;
 const allPanels: Panel[] = [
   // Row 1: map + AI agent (both wide)
   mapPanel, insightsPanel,
-  // Row 2: daily essentials
-  schedulePanel, weatherPanel, emailPanel, feishuPanel,
-  // Row 3: markets
+  // Row 2: OpenSpace skill evolution (wide)
+  skillGraphPanel,
+  // Row 3: daily essentials
+  schedulePanel, weatherPanel, emailPanel, visionPanel,
+  // Row 4: markets
   stockPanel, financePanel,
-  // Row 4: news + community (news is wide)
+  // Row 5: news + community (news is wide)
   newsPanel, socialPanel, worldClockPanel,
   // Row 6: devops + code (devops is wide)
-  devOpsPanel, codeStatusPanel,
+  devOpsPanel, codeStatusPanel, costPanel,
   // Row 7: media + extras
   liveNewsPanel, monitorsPanel, quickLinksPanel,
 ];
@@ -246,6 +256,7 @@ scheduler.registerAll([
   { name: 'insights', fn: () => insightsPanel.refresh(), intervalMs: 15 * 60_000 },
   { name: 'weather', fn: () => weatherPanel.refresh(), intervalMs: 30 * 60_000 },
   { name: 'monitors', fn: () => monitorsPanel.refresh(), intervalMs: 5 * 60_000 },
+  { name: 'costs', fn: () => costPanel.refresh(), intervalMs: 5 * 60_000 },
 ]);
 
 // ============================================================
@@ -277,6 +288,7 @@ registerCommands([
   { label: 'Finance', description: 'Jump to daily finance', action: () => scrollToPanel('finance'), keywords: ['expenses'] },
   { label: 'Map', description: 'Jump to global map', action: () => scrollToPanel('map'), keywords: ['globe', 'world'] },
   { label: 'Weather', description: 'Jump to weather panel', action: () => scrollToPanel('weather'), keywords: ['forecast', 'temperature'] },
+  { label: 'LLM Costs', description: 'Jump to LLM cost tracker', action: () => scrollToPanel('llm-costs'), keywords: ['openai', 'anthropic', 'cost', 'budget', 'spending'] },
   { label: 'Refresh All', description: 'Trigger all panel refreshes', action: () => {
     for (const name of ['stocks', 'news', 'email', 'feishu', 'social', 'code-status', 'schedule', 'finance', 'insights', 'weather', 'monitors']) {
       scheduler.trigger(name);
@@ -362,13 +374,34 @@ const SOURCE_COORDS: Record<string, [number, number]> = {
   'Politico': [-77.04, 38.91],
 };
 
+// Known server IP locations (fallback when ipapi.co is rate-limited)
+const KNOWN_IP_COORDS: Record<string, [number, number]> = {
+  '72.60.74.232':   [-74.0, 40.7],   // New York, US
+  '187.77.113.83':  [-43.1, -22.9],  // Rio de Janeiro, Brazil
+};
+
+const geoCache = new Map<string, [number, number]>(Object.entries(KNOWN_IP_COORDS));
+let cachedServerMarkers: any[] = [];
+
 async function geolocateUrl(url: string): Promise<[number, number] | null> {
+  if (geoCache.has(url)) return geoCache.get(url)!;
   try {
-    const hostname = new URL(url).hostname;
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      hostname = url.replace(/^ssh:\/\//, '').split(':')[0];
+    }
+    // Check cache by hostname too (handles https://72.x.x.x vs raw IP)
+    if (geoCache.has(hostname)) return geoCache.get(hostname)!;
     const resp = await fetch(`https://ipapi.co/${hostname}/json/`);
     if (!resp.ok) return null;
     const data = await resp.json() as any;
-    if (data.latitude && data.longitude) return [data.longitude, data.latitude];
+    if (data.latitude && data.longitude) {
+      const coords: [number, number] = [data.longitude, data.latitude];
+      geoCache.set(url, coords);
+      return coords;
+    }
   } catch {}
   return null;
 }
@@ -406,17 +439,36 @@ async function refreshMapMarkers(): Promise<void> {
       }
     } catch {}
     try {
-      const probes = JSON.parse(localStorage.getItem('mdm-server-probes') || '[]') as string[];
-      if (probes.length > 0) {
-        const probeResp = await fetch(`/api/system?action=probe&urls=${probes.slice(0, 5).join(',')}`);
+      // Collect all known probe URLs from both sources
+      const prefsProbes = getPreferences().serverProbes ?? [];
+      const localProbes = JSON.parse(localStorage.getItem('mdm-server-probes') || '[]') as string[];
+      const allProbes = [...new Set([...prefsProbes, ...localProbes])].slice(0, 5);
+
+      console.log('[Map] probes:', allProbes);
+      if (allProbes.length > 0) {
+        const probeResp = await fetch(`/api/system?action=probe&urls=${allProbes.join(',')}`);
         const probeData = await probeResp.json() as any;
+        console.log('[Map] probe results:', probeData.probes);
         for (const r of (probeData.probes || [])) {
           if (!r.url) continue;
-          const coords = await geolocateUrl(r.url);
-          if (coords) markers.push({ id: `server-${r.url}`, lat: coords[1], lng: coords[0], title: `${new URL(r.url).hostname} — ${r.ok ? 'UP' : 'DOWN'}`, type: r.ok ? ('server-up' as any) : ('server-down' as any), description: r.ok ? `${r.status} OK · ${r.latencyMs}ms` : (r.error || 'Failed'), url: r.url });
+          let hostname = r.url;
+          try { hostname = new URL(r.url).hostname; } catch { /* raw IP */ }
+          const coords = geoCache.get(r.url) ?? geoCache.get(hostname);
+          console.log('[Map] server:', r.url, 'hostname:', hostname, 'coords:', coords);
+          if (!coords) continue;
+          const m = {
+            id: `server-${hostname}`,
+            lat: coords[1], lng: coords[0],
+            title: `${hostname} — ${r.ok ? 'UP' : 'DOWN'}`,
+            type: r.ok ? ('server-up' as any) : ('server-down' as any),
+            description: r.ok ? `${r.status} OK · ${r.latencyMs}ms` : (r.error || 'Unreachable'),
+            url: r.url,
+          };
+          console.log('[Map] adding sticky marker:', m.id);
+          mapPanel.addStickyMarker(m as any);
         }
       }
-    } catch {}
+    } catch (e) { console.error('[Map] server probe error:', e); }
     mapPanel.setMarkers(markers);
   } catch (err) {
     console.warn('[Map] marker refresh failed:', err);

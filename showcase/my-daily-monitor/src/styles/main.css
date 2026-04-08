@@ -3849,3 +3849,184 @@ body.panel-resize-active iframe { pointer-events: none !important; }
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* ============================================================
+   Vision Panel
+   ============================================================ */
+.vision-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0;
+}
+
+.vision-drop {
+  position: relative;
+  border: 2px dashed var(--border);
+  border-radius: 6px;
+  margin: 10px;
+  min-height: 120px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vision-drop:hover,
+.vision-drop-over {
+  border-color: var(--accent, #3b82f6);
+  background: rgba(59,130,246,0.05);
+}
+
+.vision-drop-inner {
+  text-align: center;
+  padding: 16px;
+  pointer-events: none;
+}
+
+.vision-drop-icon {
+  font-size: 28px;
+  margin-bottom: 6px;
+}
+
+.vision-drop-text {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.vision-preview {
+  width: 100%;
+  height: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.vision-controls {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.vision-controls .ch-search-input {
+  flex: 1;
+  font-size: 11px;
+}
+
+.vision-result {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 10px 10px;
+  min-height: 0;
+}
+
+.vision-answer {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.vision-meta {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.vision-loading {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 8px 0;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.vision-error {
+  font-size: 12px;
+  color: var(--red);
+  padding: 8px 0;
+}
+
+/* ============================================================
+   Skill Graph Panel
+   ============================================================ */
+.sg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.sg-stat {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sg-container {
+  flex: 1;
+  min-height: 0;
+  height: 520px;
+  overflow: hidden;
+}
+
+.sg-tooltip {
+  position: absolute;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+  z-index: 20;
+  max-width: 240px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* ============================================================
+   CostPanel — LLM Cost Tracker
+   ============================================================ */
+.cp-empty { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+
+.cp-total {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.cp-total-label { font-size: 11px; color: var(--text-muted); }
+.cp-total-value { font-size: 22px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; }
+.cp-calls { font-size: 11px; color: var(--text-dim); margin-left: auto; }
+
+.cp-sparkline {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.cp-spark-label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+.cp-providers { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.cp-provider {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; border-radius: 6px;
+  background: var(--surface);
+}
+.cp-provider-icon { font-size: 13px; }
+.cp-provider-name { font-size: 12px; color: var(--text-secondary); flex: 1; }
+.cp-provider-cost { font-size: 13px; font-weight: 600; color: var(--text); }
+.cp-provider-calls { font-size: 11px; color: var(--text-muted); min-width: 28px; text-align: right; }
+
+.cp-section-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 5px; }
+.cp-models { margin-top: 4px; }
+.cp-model-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 0; border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+}
+.cp-model-name { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+.cp-model-cost { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
