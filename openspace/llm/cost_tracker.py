@@ -15,7 +15,8 @@ from typing import Any, Optional
 
 logger = logging.getLogger("openspace.llm.cost_tracker")
 
-_CACHE_DIR = Path("/tmp")
+_CACHE_DIR = Path("/tmp/openspace/costs")
+_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _OPENAI_PREFIXES = ("openai", "gpt", "o1", "o3")
 _ANTHROPIC_PREFIXES = ("anthropic", "claude")

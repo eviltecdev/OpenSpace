@@ -1105,7 +1105,10 @@ def run_health_check_async():
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
 
-def run_server(host: str = "127.0.0.1", port: int = 5000, debug: bool = False):
+_DEFAULT_PORT = int(os.environ.get("OPENSPACE_LOCAL_PORT", 5757))
+
+
+def run_server(host: str = "127.0.0.1", port: int = _DEFAULT_PORT, debug: bool = False):
     """
     Start desktop control server
     
@@ -1136,8 +1139,8 @@ def main():
     )
     parser.add_argument('--host', type=str, default='127.0.0.1',
                        help='Server host (default: 127.0.0.1)')
-    parser.add_argument('--port', type=int, default=5000,
-                       help='Server port (default: 5000)')
+    parser.add_argument('--port', type=int, default=_DEFAULT_PORT,
+                       help=f'Server port (default: {_DEFAULT_PORT}, override: OPENSPACE_LOCAL_PORT)')
     parser.add_argument('--debug', action='store_true',
                        help='Enable debug mode')
     parser.add_argument('--config', type=str,
@@ -1156,7 +1159,7 @@ def main():
                 server_config = get_config_value(config, 'server', {})
                 
                 host = args.host if args.host != '127.0.0.1' else get_config_value(server_config, 'host', '127.0.0.1')
-                port = args.port if args.port != 5000 else get_config_value(server_config, 'port', 5000)
+                port = args.port if args.port != _DEFAULT_PORT else get_config_value(server_config, 'port', _DEFAULT_PORT)
                 debug = args.debug or get_config_value(server_config, 'debug', False)
                 
                 run_server(host=host, port=port, debug=debug)
