@@ -16,6 +16,8 @@ from openspace.recording.action_recorder import analyze_agent_actions, load_agen
 from openspace.recording.utils import load_recording_session
 from openspace.skill_engine import SkillStore
 from openspace.skill_engine.types import SkillRecord
+from openspace.llm.task_router import route_task, log_route
+from openspace.llm.cost_tracker import get_daily_total
 
 API_PREFIX = "/api/v1"
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -259,6 +261,27 @@ def create_app() -> Flask:
         if not target.exists() or not target.is_file():
             abort(404)
         return send_from_directory(str(target.parent), target.name)
+
+    @app.route(f"{API_PREFIX}/route-task", methods=["POST"])
+    def route_task_endpoint() -> Any:
+        """Model-Router Bridge — für Ruflo und externe Tools.
+
+        POST body: {"task": "beschreibung des tasks"}
+        Returns:   {"model": "...", "reason": "..."}
+        """
+        body = request.get_json(silent=True) or {}
+        task = (body.get("task") or "").strip()
+        if not task:
+            return jsonify({"error": "task field required"}), 400
+        decision = route_task(task)
+        log_route(task, decision)
+        return jsonify({"model": decision.model, "reason": decision.reason, "task_preview": task[:80]})
+
+    @app.route(f"{API_PREFIX}/costs", methods=["GET"])
+    def costs_endpoint() -> Any:
+        """Tages-Kosten aller LLM-Provider."""
+        data = get_daily_total()
+        return jsonify(data or {"total": 0.0, "calls": 0, "models": {}, "by_provider": {}})
 
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")

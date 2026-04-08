@@ -18,6 +18,8 @@ logger = logging.getLogger("openspace.llm.cost_tracker")
 _CACHE_DIR = Path("/tmp/openspace/costs")
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+_ALERT_THRESHOLD = float(os.environ.get("OPENSPACE_COST_ALERT_THRESHOLD", "5.0"))
+
 _OPENAI_PREFIXES = ("openai", "gpt", "o1", "o3")
 _ANTHROPIC_PREFIXES = ("anthropic", "claude")
 
@@ -128,6 +130,15 @@ def record_cost(response: Any, model: str) -> Optional[float]:
 
     _save_cache(data, provider)
     logger.debug("%s cost recorded: $%.6f (model=%s, total=$%.4f)", provider, cost, model, data["total"])
+
+    # Daily cost alert
+    daily = get_daily_total()
+    if daily and daily["total"] >= _ALERT_THRESHOLD:
+        logger.warning(
+            "⚠ Daily LLM cost alert: $%.4f (threshold: $%.2f) — %d total calls today",
+            daily["total"], _ALERT_THRESHOLD, daily["calls"],
+        )
+
     return cost
 
 

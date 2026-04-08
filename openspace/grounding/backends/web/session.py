@@ -6,6 +6,7 @@ from openspace.grounding.core.types import BackendType, SessionConfig
 from openspace.grounding.core.tool import BaseTool
 from openspace.grounding.core.transport.connectors import BaseConnector
 from openspace.llm import LLMClient
+from openspace.config.constants import MODEL_HAIKU
 from openspace.utils.logging import Logger
 from dotenv import load_dotenv
 
@@ -193,7 +194,7 @@ USAGE GUIDELINES:
     ):
         super().__init__()
         self._session = session
-        self._llm = LLMClient()
+        self._llm = LLMClient(model=MODEL_HAIKU)
         
     async def _arun(self, query: str) -> str:
         if not query:

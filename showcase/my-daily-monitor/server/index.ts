@@ -8,6 +8,7 @@
 
 import http from 'node:http';
 import { parse as parseUrl } from 'node:url';
+import { checkAuth } from './auth';
 import { handleStockRequest } from './routes/stock';
 import { handleNewsRequest } from './routes/news';
 import { handleGithubRequest } from './routes/github';
@@ -15,6 +16,8 @@ import { handleEmailRequest } from './routes/email';
 import { handleCalendarRequest } from './routes/calendar';
 import { handleFeishuRequest } from './routes/feishu';
 import { handleSocialRequest } from './routes/social';
+import { handleVisionRequest } from './routes/vision';
+import { handleCostsRequest } from './routes/costs';
 
 const PORT = Number(process.env.API_PORT || 3001);
 
@@ -28,6 +31,8 @@ const routes: Record<string, RouteHandler> = {
   '/api/calendar': handleCalendarRequest,
   '/api/feishu': handleFeishuRequest,
   '/api/social': handleSocialRequest,
+  '/api/vision': handleVisionRequest,
+  '/api/costs': handleCostsRequest,
 };
 
 const server = http.createServer(async (req, res) => {
@@ -49,6 +54,14 @@ const server = http.createServer(async (req, res) => {
   if (!handler) {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
+    return;
+  }
+
+  // Auth check
+  const auth = checkAuth(pathname, req.headers as Record<string, string>);
+  if (!auth.authorized) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: auth.reason || 'Unauthorized' }));
     return;
   }
 

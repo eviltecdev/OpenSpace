@@ -27,3 +27,6 @@ export { LiveNewsPanel } from './LiveNewsPanel';
 export { QuickLinksPanel } from './QuickLinksPanel';
 export { DevOpsPanel } from './DevOpsPanel';
 export { SystemHealthPanel } from './SystemHealthPanel';
+export { VisionPanel } from './VisionPanel';
+export { SkillGraphPanel } from './SkillGraphPanel';
+export { CostPanel } from './CostPanel';
