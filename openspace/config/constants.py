@@ -1,5 +1,12 @@
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# LLM Model identifiers (single source of truth)
+# ---------------------------------------------------------------------------
+MODEL_CLAUDE = "anthropic/claude-sonnet-4-6"       # Code / Debug / Architecture
+MODEL_HAIKU = "anthropic/claude-haiku-4-5-20251001"  # Fallback / Simple / Fast
+MODEL_GPT = "openai/gpt-4o-mini"                   # Creative / Research / General
+
 CONFIG_GROUNDING = "config_grounding.json"
 CONFIG_SECURITY = "config_security.json"
 CONFIG_MCP = "config_mcp.json"
@@ -13,6 +20,9 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 __all__ = [
+    "MODEL_CLAUDE",
+    "MODEL_HAIKU",
+    "MODEL_GPT",
     "CONFIG_GROUNDING",
     "CONFIG_SECURITY",
     "CONFIG_MCP",

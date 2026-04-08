@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import hmac
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-from flask import Flask, abort, jsonify, send_from_directory, url_for
+from flask import Flask, abort, jsonify, request, send_from_directory, url_for
 
 from openspace.recording.action_recorder import analyze_agent_actions, load_agent_actions
 from openspace.recording.utils import load_recording_session
@@ -21,6 +24,12 @@ WORKFLOW_ROOTS = [
     PROJECT_ROOT / "logs" / "trajectories",
     PROJECT_ROOT / "gdpval_bench" / "results",
 ]
+
+# Cache für Workflow-Summaries: {dir_path: (mtime, summary_dict)}
+_workflow_summary_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+# Cache für _discover_workflow_dirs: (timestamp, list_of_paths)
+_discover_cache: tuple[float, List[Path]] = (0.0, [])
+_DISCOVER_TTL = 30.0  # Sekunden
 
 PIPELINE_STAGES = [
     {
@@ -57,9 +66,28 @@ PIPELINE_STAGES = [
 
 _STORE: SkillStore | None = None
 
+_API_TOKEN = os.environ.get("OPENSPACE_API_TOKEN", "").strip()
+_PUBLIC_PATHS = {f"{API_PREFIX}/health"}
+
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=None)
+
+    @app.before_request
+    def _check_auth() -> Any:
+        """Require Bearer token for all API endpoints except health and frontend."""
+        if not _API_TOKEN:
+            return None  # Dev mode: no token configured
+        path = request.path
+        if path in _PUBLIC_PATHS or not path.startswith(API_PREFIX):
+            return None  # Public: health check or frontend assets
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Unauthorized"}), 401
+        provided = auth_header[7:].strip()
+        if not hmac.compare_digest(_API_TOKEN.encode(), provided.encode()):
+            return jsonify({"error": "Unauthorized"}), 401
+        return None
 
     @app.route(f"{API_PREFIX}/health", methods=["GET"])
     def health() -> Any:
@@ -432,12 +460,18 @@ def _workflow_id(workflow_dir: Path) -> str:
 
 
 def _discover_workflow_dirs() -> List[Path]:
+    global _discover_cache
+    cached_at, cached_paths = _discover_cache
+    if time.monotonic() - cached_at < _DISCOVER_TTL:
+        return cached_paths
     discovered: Dict[str, Path] = {}
     for root in WORKFLOW_ROOTS:
         if not root.exists():
             continue
         _scan_workflow_tree(root, discovered)
-    return sorted(discovered.values(), key=lambda item: item.stat().st_mtime, reverse=True)
+    result = sorted(discovered.values(), key=lambda item: item.stat().st_mtime, reverse=True)
+    _discover_cache = (time.monotonic(), result)
+    return result
 
 
 def _scan_workflow_tree(directory: Path, discovered: Dict[str, Path], *, _depth: int = 0, _max_depth: int = 6) -> None:
@@ -464,6 +498,16 @@ def _get_workflow_dir(workflow_id: str) -> Optional[Path]:
 
 
 def _build_workflow_summary(workflow_dir: Path) -> Dict[str, Any]:
+    cache_key = str(workflow_dir)
+    try:
+        dir_mtime = workflow_dir.stat().st_mtime
+    except OSError:
+        dir_mtime = 0.0
+    if cache_key in _workflow_summary_cache:
+        cached_mtime, cached_summary = _workflow_summary_cache[cache_key]
+        if cached_mtime >= dir_mtime:
+            return cached_summary
+
     session = load_recording_session(str(workflow_dir))
     metadata = session.get("metadata") or {}
     statistics = session.get("statistics") or {}
@@ -525,7 +569,7 @@ def _build_workflow_summary(workflow_dir: Path) -> Dict[str, Any]:
     if not iterations and trajectory:
         iterations = len(trajectory)
 
-    return {
+    summary = {
         "id": _workflow_id(workflow_dir),
         "path": str(workflow_dir),
         "task_id": metadata.get("task_id") or metadata.get("task_name") or workflow_dir.name,
@@ -547,6 +591,8 @@ def _build_workflow_summary(workflow_dir: Path) -> Dict[str, Any]:
         "screenshot_count": screenshot_count,
         "selected_skills": (metadata.get("skill_selection") or {}).get("selected", []),
     }
+    _workflow_summary_cache[cache_key] = (dir_mtime, summary)
+    return summary
 
 
 def _build_timeline(actions: List[Dict[str, Any]], trajectory: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

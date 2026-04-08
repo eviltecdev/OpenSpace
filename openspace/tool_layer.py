@@ -15,6 +15,7 @@ from openspace.config.loader import get_agent_config
 from openspace.recording import RecordingManager
 from openspace.skill_engine import SkillRegistry, ExecutionAnalyzer, SkillStore
 from openspace.skill_engine.evolver import SkillEvolver
+from openspace.config.constants import MODEL_CLAUDE
 from openspace.utils.logging import Logger
 
 logger = Logger.get_logger(__name__)
@@ -23,7 +24,7 @@ logger = Logger.get_logger(__name__)
 @dataclass
 class OpenSpaceConfig:
     # LLM Configuration
-    llm_model: str = "openrouter/anthropic/claude-sonnet-4.5"
+    llm_model: str = MODEL_CLAUDE
     llm_enable_thinking: bool = False
     llm_timeout: float = 120.0
     llm_max_retries: int = 3
@@ -307,6 +308,7 @@ class OpenSpace:
         workspace_dir: Optional[str] = None,
         max_iterations: Optional[int] = None,
         task_id: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a task with OpenSpace.
@@ -357,6 +359,25 @@ class OpenSpace:
 
         # Populated inside the try block; used by finally for analysis
         result: Dict[str, Any] = {}
+
+        # Swap LLM client if a per-task model override is requested
+        _original_llm_client = None
+        if model and model != self.config.llm_model:
+            try:
+                _original_llm_client = self._grounding_agent._llm_client
+                _override_client = LLMClient(
+                    model=model,
+                    enable_thinking=self.config.llm_enable_thinking,
+                    rate_limit_delay=self.config.llm_rate_limit_delay,
+                    max_retries=self.config.llm_max_retries,
+                    timeout=self.config.llm_timeout,
+                    **self.config.llm_kwargs,
+                )
+                self._grounding_agent._llm_client = _override_client
+                logger.info("[ModelRouter] Switched to model: %s", model)
+            except Exception as _e:
+                logger.warning("[ModelRouter] Could not swap model: %s", _e)
+                _original_llm_client = None
 
         try:
             execution_context = context or {}
@@ -548,6 +569,14 @@ class OpenSpace:
             }
         
         finally:
+            # Restore original LLM client if it was swapped for this task
+            if _original_llm_client is not None:
+                try:
+                    self._grounding_agent._llm_client = _original_llm_client
+                    logger.debug("[ModelRouter] Restored original LLM client")
+                except Exception:
+                    pass
+
             recording_dir = None
             if self._recording_manager and self._recording_manager.recording_status:
                 recording_dir = self._recording_manager.trajectory_dir

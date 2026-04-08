@@ -704,7 +704,8 @@ class GroundingAgent(BaseAgent):
         """
         import asyncio
         import base64
-        import litellm
+
+        from openspace.llm import LLMClient
         
         try:
             metadata = getattr(result, 'metadata', None)
@@ -758,7 +759,10 @@ class GroundingAgent(BaseAgent):
 
             # Resolve visual-model credentials independently when the visual
             # model differs from the main reasoning model.
-            visual_model = self._visual_analysis_model or (self._llm_client.model if self._llm_client else "openrouter/anthropic/claude-sonnet-4.5")
+            from openspace.config.constants import MODEL_CLAUDE
+            visual_model = self._visual_analysis_model or (
+                self._llm_client.model if self._llm_client else MODEL_CLAUDE
+            )
             _llm_extra = {}
             if self._llm_client and visual_model == self._llm_client.model:
                 _llm_extra = getattr(self._llm_client, 'litellm_kwargs', {}) or {}
@@ -769,19 +773,16 @@ class GroundingAgent(BaseAgent):
                 except Exception as e:
                     logger.debug(f"Failed to resolve dedicated visual model credentials: {e}")
                     _llm_extra = {}
-            response = await asyncio.wait_for(
-                litellm.acompletion(
-                    model=visual_model,
-                    messages=[{
-                        "role": "user",
-                        "content": content
-                    }],
-                    timeout=self._visual_analysis_timeout,
-                    **_llm_extra,
-                ),
-                timeout=self._visual_analysis_timeout + 5
+
+            visual_client = LLMClient(
+                model=visual_model,
+                max_retries=2,
+                timeout=self._visual_analysis_timeout,
+                **_llm_extra,
             )
-            
+            response = await visual_client.complete(
+                messages=[{"role": "user", "content": content}],
+            )
             analysis = response.choices[0].message.content.strip()
             
             # Inject visual analysis into content

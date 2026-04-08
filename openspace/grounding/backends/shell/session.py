@@ -9,6 +9,7 @@ from openspace.grounding.backends.shell.transport.local_connector import LocalSh
 from openspace.grounding.core.tool import BaseTool
 from openspace.grounding.core.security.policies import SecurityPolicyManager
 from openspace.llm import LLMClient
+from openspace.config.constants import MODEL_HAIKU
 from openspace.utils.logging import Logger
 
 logger = Logger.get_logger(__name__)
@@ -51,7 +52,7 @@ class ShellSession(BaseSession):
         self.default_working_dir = default_working_dir
         self.default_env = default_env or {}
         self.default_conda_env = default_conda_env
-        self.model = model
+        self.model = model or MODEL_HAIKU
         self.use_clawwork_productivity = use_clawwork_productivity
         self.productivity_date = productivity_date or "default"
 
@@ -344,7 +345,7 @@ If you already have the exact command/script to run, use run_shell instead."""
         if resolved_model:
             self._llm = LLMClient(model=resolved_model)
         else:
-            self._llm = LLMClient()
+            self._llm = LLMClient(model="anthropic/claude-haiku-4-5-20251001")
         self.client_password = client_password
         self.max_steps = max_steps
         self._system_info = None

@@ -21,6 +21,22 @@ from openspace.local_server.feature_checker import FeatureChecker
 
 platform_name = platform.system()
 
+_HOME = os.path.realpath(os.path.expanduser("~"))
+_ALLOWED_ROOTS = (_HOME, "/tmp")
+
+
+def _validate_path(path: str) -> str:
+    """Resolve path and ensure it stays within allowed roots.
+
+    Raises ValueError if the resolved path escapes the allowed roots,
+    preventing path-traversal attacks (e.g. ../../../../etc/passwd).
+    """
+    resolved = os.path.realpath(os.path.expanduser(path))
+    if not any(resolved.startswith(root) for root in _ALLOWED_ROOTS):
+        raise ValueError(f"Access denied: path outside allowed directories: {resolved}")
+    return resolved
+
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 
@@ -656,9 +672,9 @@ def list_directory():
     path = data.get('path', '.')
     
     try:
-        path = os.path.expanduser(path)
+        path = _validate_path(path)
         items = []
-        
+
         for item in os.listdir(path):
             item_path = os.path.join(path, item)
             items.append({
@@ -688,9 +704,12 @@ def file_operation():
     
     if not path:
         return jsonify({'status': 'error', 'message': 'Path required'}), 400
-    
-    path = os.path.expanduser(path)
-    
+
+    try:
+        path = _validate_path(path)
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 403
+
     try:
         if operation == 'read':
             with open(path, 'r') as f:
