@@ -25,6 +25,7 @@
 
 ## 📢 News
 
+- **2026-04-09** 💬 Multi-channel **communication gateway**. OpenSpace can now receive and respond to messages from external platforms. Ships with **WhatsApp** (Baileys bridge + QR auth) and **Feishu** (HTTP webhook) adapters, session management, attachment caching, and allowlist-based access control. See [`openspace/config/README.md`](openspace/config/README.md) for setup.
 - **2026-04-07** 🌐 OpenSpace MCP now supports standalone **SSE** and **streamable HTTP** startup, making it easier for remote hosts to connect over HTTP instead of stdio and bypass stdio-bound MCP server timeout bottlenecks. See the [host integration guide](openspace/host_skills/README.md) for setup details.
 - **2026-04-06** 🛠️ Fixed multiple runtime issues across grounding, MCP serving, skill evolution, and persistence, improving execution stability and recovery in long-running workflows.
 - **2026-04-05** 🧭 Cleaned up LLM credential resolution: centralized `.env` loading, improved host config auto-detection, and made provider-native env handling more consistent.
@@ -520,6 +521,14 @@ OpenSpace/
 │   │   ├── embedding.py                  # Embedding generation for skill search
 │   │   ├── auth.py                       # API key management
 │   │   └── cli/                          # CLI tools (download_skill, upload_skill)
+│   │
+│   ├── 💬 communication/                  # Multi-Channel Communication Gateway
+│   │   ├── gateway.py                    # Message routing, session management, reply dispatch
+│   │   ├── adapters/                     # Platform adapters (WhatsApp, Feishu)
+│   │   ├── bridges/                      # Non-Python runtimes (WhatsApp Baileys bridge)
+│   │   ├── config.py                     # Communication config loader
+│   │   ├── session_store.py              # Per-channel session persistence
+│   │   └── types.py                      # ChannelMessage, ChannelSource, SendResult
 │   │
 │   ├── 🔧 platform/                      # Platform abstraction (system info, screenshots)
 │   ├── 🔧 host_detection/                # Auto-detect nanobot / openclaw credentials

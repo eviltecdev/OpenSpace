@@ -25,6 +25,7 @@
 
 ## 📢 最新动态
 
+- **2026-04-09** 💬 多渠道**通信网关**上线。OpenSpace 现可接收并回复外部平台消息。内置 **WhatsApp**（Baileys bridge + 扫码认证）与**飞书**（HTTP webhook）适配器，支持会话管理、附件缓存和白名单访问控制。配置方式见 [`openspace/config/README.md`](openspace/config/README.md)。
 - **2026-04-07** 🌐 OpenSpace MCP 新增独立 **SSE** 与 **streamable HTTP** 启动方式，便于远端 host 通过 HTTP 接入，绕过基于 stdio 的 MCP server timeout 瓶颈。具体接入方式见 [host integration 文档](openspace/host_skills/README.md)。
 - **2026-04-06** 🛠️ 修复多项运行时问题，覆盖 grounding、MCP 服务、skill 进化与持久化链路，长流程执行的稳定性与恢复能力进一步提升。
 - **2026-04-05** 🧭 LLM 凭证解析清理完成：统一 `.env` 加载逻辑，改进宿主配置自动识别，并让 provider 原生环境变量处理更一致。
@@ -520,6 +521,14 @@ OpenSpace/
 │   │   ├── embedding.py                  # Skill 搜索的向量生成
 │   │   ├── auth.py                       # API 密钥管理
 │   │   └── cli/                          # CLI 工具（download_skill、upload_skill）
+│   │
+│   ├── 💬 communication/                  # 多渠道通信网关
+│   │   ├── gateway.py                    # 消息路由、会话管理、回复分发
+│   │   ├── adapters/                     # 平台适配器（WhatsApp、飞书）
+│   │   ├── bridges/                      # 非 Python 运行时（WhatsApp Baileys bridge）
+│   │   ├── config.py                     # 通信配置加载
+│   │   ├── session_store.py              # 按频道的会话持久化
+│   │   └── types.py                      # ChannelMessage, ChannelSource, SendResult
 │   │
 │   ├── 🔧 platform/                      # 平台抽象（系统信息、截图）
 │   ├── 🔧 host_detection/                # 自动检测 nanobot / openclaw 凭证
