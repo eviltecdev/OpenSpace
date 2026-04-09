@@ -156,6 +156,13 @@ async def _get_openspace():
             if backend_scope_raw else None
         )
 
+        # Cost optimisation: route background operations to cheaper models.
+        # Set OPENSPACE_ANALYSIS_MODEL / OPENSPACE_EVOLUTION_MODEL /
+        # OPENSPACE_SELECTION_MODEL in .env to override.
+        analysis_model = os.environ.get("OPENSPACE_ANALYSIS_MODEL") or None
+        evolution_model = os.environ.get("OPENSPACE_EVOLUTION_MODEL") or None
+        selection_model = os.environ.get("OPENSPACE_SELECTION_MODEL") or None
+
         config_path = build_grounding_config_path()
         model, llm_kwargs = build_llm_kwargs(env_model)
 
@@ -173,6 +180,9 @@ async def _get_openspace():
             recording_log_dir=recording_log_dir,
             backend_scope=backend_scope,
             grounding_config_path=config_path,
+            execution_analyzer_model=analysis_model,
+            skill_evolver_model=evolution_model,
+            skill_registry_model=selection_model,
         )
 
         _openspace_instance = OpenSpace(config=config)
@@ -557,11 +567,24 @@ async def execute_task(
                     can select and track them.  Directories are re-scanned
                     on every call to discover skills created since the last
                     invocation.
+
+    Args (continued):
         search_scope: Skill search scope before execution.
                       "all" (default) — local + cloud; falls back to local
                       if no API key is configured.
                       "local" — local SkillRegistry only (fast, no cloud).
+
+    Rate limit: Max 3 concurrent, 10 per minute.
     """
+    from openspace.mcp_server_limiter import execute_task_limiter
+
+    # Check rate limit
+    if not await execute_task_limiter.acquire():
+        return _json_error(
+            "Rate limit exceeded: max 3 concurrent tasks, 10 per minute. Please try again later.",
+            status="rate_limited",
+        )
+
     try:
         openspace = await _get_openspace()
 
@@ -582,11 +605,28 @@ async def execute_task(
         if search_scope == "all":
             imported_skills = await _cloud_search_and_import(task)
 
+        # Auto-route to best model based on task content
+        from openspace.llm.task_router import route_task, log_route
+        route = route_task(task)
+        log_route(task, route)
+
+        # Write last-used model for statusline
+        try:
+            import pathlib, datetime
+            _state_dir = pathlib.Path("/tmp/openspace")
+            _state_dir.mkdir(parents=True, exist_ok=True)
+            (_state_dir / "last_model").write_text(
+                f"{route.model}|{datetime.datetime.now().isoformat()}"
+            )
+        except Exception:
+            pass
+
         # Execute
         result = await openspace.execute(
             task=task,
             workspace_dir=workspace_dir,
             max_iterations=max_iterations,
+            model=route.model,
         )
 
         # Write .upload_meta.json for each evolved skill
@@ -603,6 +643,8 @@ async def execute_task(
     except Exception as e:
         logger.error(f"execute_task failed: {e}", exc_info=True)
         return _json_error(e, status="error")
+    finally:
+        await execute_task_limiter.release()
 
 
 @mcp.tool()
@@ -631,7 +673,18 @@ async def search_skills(
         source: "all" (cloud + local), "local", or "cloud".  Default: "all".
         limit: Maximum results to return (default: 20).
         auto_import: Auto-download top public cloud skills (default: True).
+
+    Rate limit: Max 5 concurrent, 20 per minute.
     """
+    from openspace.mcp_server_limiter import search_skills_limiter
+
+    # Check rate limit
+    if not await search_skills_limiter.acquire():
+        return _json_error(
+            "Rate limit exceeded: max 5 concurrent searches, 20 per minute. Please try again later.",
+            status="rate_limited",
+        )
+
     try:
         from openspace.cloud.search import hybrid_search_skills
 
@@ -706,6 +759,36 @@ async def search_skills(
     except Exception as e:
         logger.error(f"search_skills failed: {e}", exc_info=True)
         return _json_error(e)
+    finally:
+        await search_skills_limiter.release()
+
+
+def _validate_skill_path(skill_dir: str) -> Path:
+    """Validate that skill_dir is within allowed directories.
+
+    Security: Prevents path traversal attacks outside skill registries.
+    """
+    skill_path = Path(skill_dir).resolve()
+
+    # Allowed directories for skills
+    allowed_dirs = [
+        Path(os.environ.get("OPENSPACE_HOST_SKILL_DIRS", "")).resolve(),
+        Path("~/.openclaw/skills/").expanduser().resolve(),
+        Path.home() / ".openspace" / "skills",
+    ]
+    allowed_dirs = [d for d in allowed_dirs if d != Path("")]  # Filter empty
+
+    # Check if skill_path is within any allowed directory
+    for allowed_dir in allowed_dirs:
+        try:
+            skill_path.relative_to(allowed_dir)
+            return skill_path
+        except ValueError:
+            pass
+
+    raise ValueError(
+        f"Skill path outside allowed directories. Must be in: {', '.join(str(d) for d in allowed_dirs)}"
+    )
 
 
 @mcp.tool()
@@ -744,7 +827,11 @@ async def fix_skill(
         if not direction:
             return _json_error("direction is required — describe what to fix.")
 
-        skill_path = Path(skill_dir)
+        # Validate path safety
+        try:
+            skill_path = _validate_skill_path(skill_dir)
+        except ValueError as e:
+            return _json_error(f"Invalid skill path: {str(e)}")
         skill_md = skill_path / "SKILL.md"
         if not skill_md.exists():
             return _json_error(f"SKILL.md not found in {skill_dir}")
@@ -865,7 +952,12 @@ async def upload_skill(
         change_summary: Override summary.  Default: from .upload_meta.json.
     """
     try:
-        skill_path = Path(skill_dir)
+        # Validate path safety
+        try:
+            skill_path = _validate_skill_path(skill_dir)
+        except ValueError as e:
+            return _json_error(f"Invalid skill path: {str(e)}")
+
         if not (skill_path / "SKILL.md").exists():
             return _json_error(f"SKILL.md not found in {skill_dir}")
 

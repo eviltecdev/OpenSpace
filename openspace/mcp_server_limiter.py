@@ -1,0 +1,43 @@
+"""Rate limiting for MCP server tools."""
+
+import asyncio
+import time
+from typing import Optional
+
+
+class RateLimiter:
+    """Token bucket rate limiter."""
+
+    def __init__(self, max_concurrent: int = 3, max_per_minute: int = 10):
+        self.max_concurrent = max_concurrent
+        self.max_per_minute = max_per_minute
+        self.active_tasks = 0
+        self.request_times = []
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> bool:
+        """Acquire a rate limit token."""
+        async with self._lock:
+            if self.active_tasks >= self.max_concurrent:
+                return False
+
+            now = time.time()
+            minute_ago = now - 60
+            self.request_times = [t for t in self.request_times if t > minute_ago]
+
+            if len(self.request_times) >= self.max_per_minute:
+                return False
+
+            self.active_tasks += 1
+            self.request_times.append(now)
+            return True
+
+    async def release(self):
+        """Release a rate limit token."""
+        async with self._lock:
+            self.active_tasks = max(0, self.active_tasks - 1)
+
+
+# Global limiters
+execute_task_limiter = RateLimiter(max_concurrent=3, max_per_minute=10)
+search_skills_limiter = RateLimiter(max_concurrent=5, max_per_minute=20)
