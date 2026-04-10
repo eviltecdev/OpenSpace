@@ -275,25 +275,27 @@ class TestCloudSearchAndImport:
 
     @pytest.mark.asyncio
     async def test_cloud_search_empty_query(self):
-        """Empty query returns empty list."""
+        """Empty query returns empty list and cloud_available=True."""
         from openspace.mcp_server import _cloud_search_and_import
 
         with patch("openspace.mcp_server._get_cloud_client"):
-            result = await _cloud_search_and_import("")
+            results, cloud_available = await _cloud_search_and_import("")
 
-            assert result == []
+            assert results == []
+            assert cloud_available is True
 
     @pytest.mark.asyncio
     async def test_cloud_search_empty_results(self, mock_cloud_client):
-        """No results returns empty list."""
+        """No results returns empty list and cloud_available=True."""
         from openspace.mcp_server import _cloud_search_and_import
 
         mock_cloud_client.search_record_embeddings = MagicMock(return_value=[])
 
         with patch("openspace.mcp_server._get_cloud_client", return_value=mock_cloud_client):
-            result = await _cloud_search_and_import("test query")
+            results, cloud_available = await _cloud_search_and_import("test query")
 
-            assert result == []
+            assert results == []
+            assert cloud_available is True
 
     @pytest.mark.asyncio
     async def test_cloud_search_filters_private(self, mock_cloud_client):
@@ -307,10 +309,11 @@ class TestCloudSearchAndImport:
 
         with patch("openspace.mcp_server._get_cloud_client", return_value=mock_cloud_client):
             with patch("openspace.mcp_server._do_import_cloud_skill", return_value={"status": "imported"}):
-                result = await _cloud_search_and_import("test")
+                results, cloud_available = await _cloud_search_and_import("test")
 
                 # Should only import public skills
-                assert len([r for r in result if "Public" in str(r)]) >= 0
+                assert len([r for r in results if "Public" in str(r)]) >= 0
+                assert cloud_available is True
 
     @pytest.mark.asyncio
     async def test_cloud_search_respects_limit(self, mock_cloud_client):
@@ -329,10 +332,11 @@ class TestCloudSearchAndImport:
 
         with patch("openspace.mcp_server._get_cloud_client", return_value=mock_cloud_client):
             with patch("openspace.mcp_server._do_import_cloud_skill", return_value={"status": "imported"}):
-                result = await _cloud_search_and_import("test", limit=5)
+                results, cloud_available = await _cloud_search_and_import("test", limit=5)
 
                 # Should not exceed limit
-                assert len(result) <= 5
+                assert len(results) <= 5
+                assert cloud_available is True
 
 
 # ============================================================================

@@ -9,7 +9,7 @@ logger = logging.getLogger("openspace.mcp_server_limiter")
 
 
 class RateLimiter:
-    """Token bucket rate limiter."""
+    """Token bucket rate limiter with idempotent release semantics."""
 
     def __init__(self, max_concurrent: int = 3, max_per_minute: int = 10):
         self.max_concurrent = max_concurrent
@@ -19,7 +19,11 @@ class RateLimiter:
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> bool:
-        """Acquire a rate limit token."""
+        """Acquire a rate limit token.
+
+        Returns True if token acquired, False if rate limit exceeded.
+        Caller MUST only call release() if acquire() returned True.
+        """
         async with self._lock:
             if self.active_tasks >= self.max_concurrent:
                 logger.warning(
@@ -44,9 +48,15 @@ class RateLimiter:
             return True
 
     async def release(self):
-        """Release a rate limit token."""
+        """Release a rate limit token. Safe to call multiple times (idempotent)."""
         async with self._lock:
-            self.active_tasks = max(0, self.active_tasks - 1)
+            if self.active_tasks > 0:
+                self.active_tasks -= 1
+            else:
+                logger.warning(
+                    f"Rate limit release called with no active tasks. "
+                    f"This indicates acquire/release mismatch."
+                )
 
 
 # Global limiters

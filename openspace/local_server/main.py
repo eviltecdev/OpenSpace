@@ -450,8 +450,16 @@ def launch_app():
             index = command.index('google-chrome')
             command[index] = 'chromium'
             logger.info("ARM architecture detected: replacing 'google-chrome' with 'chromium'")
-        
-        subprocess.Popen(command, shell=shell)
+
+        # Launch with hygiene: redirect stdout/stderr to avoid deadlock/pipe exhaustion,
+        # and close_fds to avoid resource leaks.
+        subprocess.Popen(
+            command,
+            shell=shell,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True
+        )
         cmd_str = command if shell else " ".join(command)
         logger.info(f"Application launched successfully: {cmd_str}")
         return jsonify({
@@ -881,30 +889,40 @@ def set_wallpaper():
 # Screen Recording
 @app.route('/start_recording', methods=['POST'])
 def start_recording():
-    """Start screen recording (supports Linux, macOS, Windows)"""
+    """Start screen recording (supports Linux, macOS, Windows).
+
+    Ensures recording_process is None on both success and failure,
+    making state predictable for concurrent/retry scenarios.
+    """
     global recording_process
-    
+
     # Check if platform adapter supports recording
     if not platform_adapter or not hasattr(platform_adapter, 'start_recording'):
         return jsonify({
             'status': 'error',
             'message': f'Recording not supported on {platform_name}'
         }), 501
-    
-    # Check if recording is already in progress
-    if recording_process and recording_process.poll() is None:
-        return jsonify({
-            'status': 'error',
-            'message': 'Recording is already in progress.'
-        }), 400
-    
+
+    # Check if recording is already in progress (idempotent check).
+    # Use poll() safely: if process doesn't exist, poll() returns non-None.
+    if recording_process:
+        poll_result = recording_process.poll()
+        if poll_result is None:
+            # Process still running
+            return jsonify({
+                'status': 'error',
+                'message': 'Recording is already in progress.'
+            }), 400
+        # Process exited; clear stale reference
+        recording_process = None
+
     # Clean up old recording file
     if os.path.exists(recording_path):
         try:
             os.remove(recording_path)
         except OSError as e:
             logger.error(f"Cannot delete old recording file: {e}")
-    
+
     try:
         # Use platform adapter to start recording
         result = platform_adapter.start_recording(recording_path)
@@ -917,14 +935,18 @@ def start_recording():
                 'message': 'Recording started'
             })
         else:
-            logger.error(f"Failed to start recording: {result.get('message', 'Unknown error')}")
+            # Ensure process is cleared even if platform adapter returns error
+            recording_process = None
+            error_msg = result.get('message', 'Unknown error')
+            logger.error(f"Failed to start recording: {error_msg}")
+            # Sanitize error message: don't leak platform-specific details
             return jsonify({
                 'status': 'error',
-                'message': result.get('message', 'Failed to start recording')
+                'message': 'Failed to start recording'
             }), 500
 
     except Exception as e:
-        # Ensure recording_process is cleared on exception
+        # Ensure recording_process is always cleared on exception
         recording_process = None
         logger.error(f"Failed to start recording: {str(e)}")
         return jsonify({
@@ -934,41 +956,62 @@ def start_recording():
 
 @app.route('/end_recording', methods=['POST'])
 def end_recording():
-    """End screen recording (supports Linux, macOS, Windows)"""
+    """End screen recording (supports Linux, macOS, Windows).
+
+    Idempotent cleanup: always leaves recording_process = None
+    so that retried calls or concurrent access don't corrupt state.
+    """
     global recording_process
-    
-    # Check if recording is in progress
-    if not recording_process or recording_process.poll() is not None:
+
+    # Check if recording is in progress (idempotent guard).
+    if not recording_process:
+        return jsonify({
+            'status': 'error',
+            'message': 'No recording in progress'
+        }), 400
+
+    # Verify process still alive. If poll() != None, process exited (stale reference).
+    if recording_process.poll() is not None:
         recording_process = None
         return jsonify({
             'status': 'error',
             'message': 'No recording in progress'
         }), 400
-    
+
     try:
         # Use platform adapter to stop recording
         if platform_adapter and hasattr(platform_adapter, 'stop_recording'):
-            result = platform_adapter.stop_recording(recording_process)
-            recording_process = None
-
-            if result['status'] != 'success':
-                logger.error(f"Failed to stop recording: {result.get('message', 'Unknown error')}")
-                return jsonify(result), 500
-        else:
-            # Fallback: terminate process directly
             try:
-                recording_process.send_signal(signal.SIGINT)
+                result = platform_adapter.stop_recording(recording_process)
+                if result['status'] != 'success':
+                    error_msg = result.get('message', 'Unknown error')
+                    logger.error(f"Failed to stop recording: {error_msg}")
+                    # Sanitize error message: don't leak platform-specific details
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'Failed to stop recording'
+                    }), 500
+            finally:
+                # Ensure process is cleared regardless of adapter result
+                recording_process = None
+        else:
+            # Fallback: terminate process directly (idempotent cleanup)
+            try:
                 try:
+                    recording_process.send_signal(signal.SIGINT)
                     recording_process.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     logger.warning("ffmpeg not responding, force terminating")
                     recording_process.kill()
                     recording_process.wait()
+                except Exception as cleanup_err:
+                    logger.warning(f"Error cleaning up recording process: {cleanup_err}")
             finally:
+                # Always clear process reference
                 recording_process = None
 
         # Check if recording file exists
-        # wait for ffmpeg to write the file header
+        # Wait for ffmpeg to write file header
         for _ in range(10):
             if os.path.exists(recording_path) and os.path.getsize(recording_path) > 0:
                 break
@@ -983,12 +1026,15 @@ def end_recording():
 
     except Exception as e:
         logger.error(f"Failed to end recording: {str(e)}")
+        # Ensure process is cleared before returning error (idempotent cleanup)
         if recording_process:
             try:
-                recording_process.kill()
-                recording_process.wait()
-            except Exception:
-                pass
+                # Final safety cleanup: kill process if still running
+                if recording_process.poll() is None:
+                    recording_process.kill()
+                    recording_process.wait(timeout=5)
+            except Exception as kill_err:
+                logger.warning(f"Error killing recording process during exception: {kill_err}")
         recording_process = None
         return jsonify({
             'status': 'error',

@@ -17,13 +17,20 @@ Environment variables: see ``openspace/host_detection/`` and ``openspace/cloud/a
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import json
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Request correlation ID for end-to-end tracing
+_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    'request_id', default=''
+)
 
 
 class _MCPSafeStdout:
@@ -107,12 +114,25 @@ if os.name == "nt":
 
 sys.stdout = _MCPSafeStdout(_real_stdout, sys.stderr)
 
+class _RequestIdFilter(logging.Filter):
+    """Add request_id to log records for correlation."""
+
+    def filter(self, record):
+        request_id = _request_id_var.get('')
+        if request_id:
+            record.request_id = request_id
+        else:
+            record.request_id = 'N/A'
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - [%(request_id)s] - %(levelname)s - %(message)s",
     handlers=[logging.FileHandler(_LOG_DIR / "mcp_server.log")],
 )
 logger = logging.getLogger("openspace.mcp_server")
+logger.addFilter(_RequestIdFilter())
 
 from mcp.server.fastmcp import FastMCP
 
@@ -132,7 +152,9 @@ _openspace_lock = asyncio.Lock()
 _standalone_store = None
 
 # Internal state: tracks bot skill directories already registered this session.
+# Protected by _registered_skill_dirs_lock to prevent concurrent mutation.
 _registered_skill_dirs: set = set()
+_registered_skill_dirs_lock = asyncio.Lock()
 
 _UPLOAD_META_FILENAME = ".upload_meta.json"
 
@@ -385,6 +407,8 @@ async def _auto_register_skill_dirs(skill_dirs: List[str]) -> int:
 
     Called automatically by ``execute_task`` on every invocation. Directories
     are re-scanned each time so that skills created by the host bot since the last call are discovered immediately.
+
+    Thread-safe: uses lock to protect concurrent checks and updates to _registered_skill_dirs.
     """
     global _registered_skill_dirs
 
@@ -405,9 +429,12 @@ async def _auto_register_skill_dirs(skill_dirs: List[str]) -> int:
         store = _get_store()
         db_created = await store.sync_from_registry(added)
 
-    is_first = any(d not in _registered_skill_dirs for d in skill_dirs)
-    for d in skill_dirs:
-        _registered_skill_dirs.add(d)
+    # Atomically check and update _registered_skill_dirs to prevent race conditions
+    # under concurrent execute_task + search_skills calls.
+    async with _registered_skill_dirs_lock:
+        is_first = any(d not in _registered_skill_dirs for d in skill_dirs)
+        for d in skill_dirs:
+            _registered_skill_dirs.add(d)
 
     if added:
         action = "Auto-registered" if is_first else "Re-scanned & found"
@@ -418,8 +445,12 @@ async def _auto_register_skill_dirs(skill_dirs: List[str]) -> int:
     return len(added)
 
 
-async def _cloud_search_and_import(task: str, limit: int = 8) -> List[Dict[str, Any]]:
+async def _cloud_search_and_import(task: str, limit: int = 8) -> tuple[List[Dict[str, Any]], bool]:
     """Search cloud for skills relevant to *task* and auto-import top hits.
+
+    Returns: (import_results, cloud_available)
+      - import_results: List of imported skills
+      - cloud_available: True if cloud search succeeded; False if unreachable/timeout
 
     This is **stage 1** of a two-stage pipeline:
       Stage 1 (here): server-side embedding search → pick top-N to import locally.
@@ -430,11 +461,13 @@ async def _cloud_search_and_import(task: str, limit: int = 8) -> List[Dict[str, 
     that stage 2 has a larger pool to choose from. Stage 1 relies on the
     server's embedding search to filter thousands of cloud candidates down
     to a manageable import set; stage 2 makes the final task-specific choice.
+
+    If cloud is unavailable, returns ([], False) so caller can detect degradation.
     """
     try:
         normalized_task_query = task.strip()
         if not normalized_task_query:
-            return []
+            return [], True
 
         cloud_client = _get_cloud_client()
         cloud_search_results = await asyncio.to_thread(
@@ -443,7 +476,7 @@ async def _cloud_search_and_import(task: str, limit: int = 8) -> List[Dict[str, 
             limit=min(limit * 2, 300),
         )
         if not cloud_search_results:
-            return []
+            return [], True
 
         public_cloud_hits = [
             cloud_result for cloud_result in cloud_search_results
@@ -467,11 +500,11 @@ async def _cloud_search_and_import(task: str, limit: int = 8) -> List[Dict[str, 
 
         if import_results:
             logger.info(f"Cloud search imported {len(import_results)} skill(s)")
-        return import_results
+        return import_results, True
 
     except Exception as e:
-        logger.warning(f"_cloud_search_and_import failed (non-fatal): {e}")
-        return []
+        logger.warning(f"_cloud_search_and_import failed (cloud unavailable): {e}")
+        return [], False
 
 
 async def _do_import_cloud_skill(skill_id: str, target_dir: Optional[str] = None) -> Dict[str, Any]:
@@ -620,10 +653,16 @@ async def execute_task(
 
     Rate limit: Max 3 concurrent, 10 per minute.
     """
+    # Generate request_id for end-to-end tracing
+    request_id = str(uuid.uuid4())
+    _request_id_var.set(request_id)
+    logger.info(f"execute_task starting: task_preview={task[:100]}")
+
     from openspace.mcp_server_limiter import execute_task_limiter
 
-    # Check rate limit
-    if not await execute_task_limiter.acquire():
+    # Check rate limit. Only call release() if acquire() succeeds.
+    acquire_succeeded = await execute_task_limiter.acquire()
+    if not acquire_succeeded:
         return _json_error(
             "Rate limit exceeded: max 3 concurrent tasks, 10 per minute. Please try again later.",
             status="rate_limited",
@@ -646,8 +685,9 @@ async def execute_task(
 
         # Cloud search + import (if requested)
         imported_skills: List[Dict[str, Any]] = []
+        cloud_available = True
         if search_scope == "all":
-            imported_skills = await _cloud_search_and_import(task)
+            imported_skills, cloud_available = await _cloud_search_and_import(task)
 
         # Auto-route to best model based on task content
         from openspace.llm.task_router import route_task, log_route
@@ -682,13 +722,17 @@ async def execute_task(
         formatted = _format_task_result(result)
         if imported_skills:
             formatted["imported_skills"] = imported_skills
+        # Include cloud availability flag for operational visibility
+        formatted["cloud_available"] = cloud_available
         return _json_ok(formatted)
 
     except Exception as e:
         logger.error(f"execute_task failed: {e}", exc_info=True)
         return _json_error(e, status="error")
     finally:
-        await execute_task_limiter.release()
+        # Only release if acquire() succeeded (idempotent guard)
+        if acquire_succeeded:
+            await execute_task_limiter.release()
 
 
 @mcp.tool()
@@ -720,10 +764,16 @@ async def search_skills(
 
     Rate limit: Max 5 concurrent, 20 per minute.
     """
+    # Generate request_id for end-to-end tracing
+    request_id = str(uuid.uuid4())
+    _request_id_var.set(request_id)
+    logger.info(f"search_skills starting: query={query[:100]}")
+
     from openspace.mcp_server_limiter import search_skills_limiter
 
-    # Check rate limit
-    if not await search_skills_limiter.acquire():
+    # Check rate limit. Only call release() if acquire() succeeds.
+    acquire_succeeded = await search_skills_limiter.acquire()
+    if not acquire_succeeded:
         return _json_error(
             "Rate limit exceeded: max 5 concurrent searches, 20 per minute. Please try again later.",
             status="rate_limited",
@@ -804,7 +854,9 @@ async def search_skills(
         logger.error(f"search_skills failed: {e}", exc_info=True)
         return _json_error(e)
     finally:
-        await search_skills_limiter.release()
+        # Only release if acquire() succeeded (idempotent guard)
+        if acquire_succeeded:
+            await search_skills_limiter.release()
 
 
 def _validate_skill_path(skill_dir: str) -> Path:
