@@ -205,13 +205,16 @@ def health():
 
 @app.route('/ready', methods=['GET'])
 def ready():
-    """Kubernetes readiness probe: 200 if ready to serve, 503 if not."""
+    """Kubernetes readiness probe: 200 if ready to serve, 503 if not.
+
+    Never returns 500. Always safe to call.
+    """
     try:
-        from openspace.mcp_server import _is_ready
-        is_ready = _is_ready()
-    except (ImportError, AttributeError):
-        # MCP server not initialized; local_server is ready if we got here
-        is_ready = True
+        from openspace.runtime_state import get_is_ready
+        is_ready = get_is_ready()
+    except Exception:
+        # Any error loading state → not ready (safer than guessing)
+        is_ready = False
 
     if is_ready:
         return jsonify({'ready': True, 'reason': None}), 200
@@ -220,31 +223,32 @@ def ready():
 
 @app.route('/status', methods=['GET'])
 def status():
-    """Diagnostics endpoint: uptime, initialization state, limiter state, cloud status."""
+    """Diagnostics endpoint: uptime, initialization state, limiter state, cloud status.
+
+    Never returns 500. Always safe to call with best-effort data.
+    """
     uptime_seconds = time.time() - _app_startup_time
 
-    # Get MCP server state if available
-    openspace_initialized = False
-    execute_task_active = 0
-    search_skills_active = 0
-    cloud_status = 'unknown'
-
+    # Get MCP server state via lightweight bridge
+    # All getters handle errors gracefully (no exceptions)
     try:
-        from openspace.mcp_server import (
-            _openspace_instance,
-            execute_task_limiter,
-            search_skills_limiter,
-            _last_cloud_status,
+        from openspace.runtime_state import (
+            get_openspace_initialized,
+            get_execute_task_active,
+            get_search_skills_active,
+            get_cloud_status,
         )
-        openspace_initialized = (
-            _openspace_instance is not None
-            and _openspace_instance.is_initialized()
-        )
-        execute_task_active = execute_task_limiter.active_tasks
-        search_skills_active = search_skills_limiter.active_tasks
-        cloud_status = _last_cloud_status
-    except (ImportError, AttributeError):
-        pass
+
+        openspace_initialized = get_openspace_initialized()
+        execute_task_active = get_execute_task_active()
+        search_skills_active = get_search_skills_active()
+        cloud_status = get_cloud_status()
+    except Exception:
+        # Fallback to safe defaults if runtime_state import fails
+        openspace_initialized = False
+        execute_task_active = 0
+        search_skills_active = 0
+        cloud_status = 'unknown'
 
     return jsonify({
         'uptime_seconds': uptime_seconds,

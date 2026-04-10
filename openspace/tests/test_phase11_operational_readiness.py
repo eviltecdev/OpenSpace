@@ -84,19 +84,17 @@ class TestReadyReadiness:
     def test_ready_true_when_openspace_initialized(self, flask_test_client,
                                                      mock_openspace_initialized):
         """GET /ready should return 200 when OpenSpace initialized."""
-        with patch('openspace.mcp_server._openspace_instance', mock_openspace_initialized):
-            with patch('openspace.mcp_server._shutdown_requested', False):
-                with patch('openspace.mcp_server._is_ready', return_value=True):
-                    response = flask_test_client.get('/ready')
-                    assert response.status_code == 200
-                    data = json.loads(response.data)
-                    assert data['ready'] is True
-                    assert data['reason'] is None
+        with patch('openspace.runtime_state.get_is_ready', return_value=True):
+            response = flask_test_client.get('/ready')
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['ready'] is True
+            assert data['reason'] is None
 
     def test_ready_false_when_openspace_not_initialized(self, flask_test_client,
                                                           mock_openspace_not_initialized):
         """GET /ready should return 503 when OpenSpace not initialized."""
-        with patch('openspace.mcp_server._is_ready', return_value=False):
+        with patch('openspace.runtime_state.get_is_ready', return_value=False):
             response = flask_test_client.get('/ready')
             assert response.status_code == 503
             data = json.loads(response.data)
@@ -106,7 +104,7 @@ class TestReadyReadiness:
     def test_ready_false_when_shutting_down(self, flask_test_client,
                                              mock_openspace_initialized):
         """GET /ready should return 503 when shutdown requested."""
-        with patch('openspace.mcp_server._is_ready', return_value=False):
+        with patch('openspace.runtime_state.get_is_ready', return_value=False):
             response = flask_test_client.get('/ready')
             assert response.status_code == 503
             data = json.loads(response.data)
@@ -114,7 +112,7 @@ class TestReadyReadiness:
 
     def test_ready_response_format_success(self, flask_test_client):
         """GET /ready (success) should have ready and reason fields."""
-        with patch('openspace.mcp_server._is_ready', return_value=True):
+        with patch('openspace.runtime_state.get_is_ready', return_value=True):
             response = flask_test_client.get('/ready')
             data = json.loads(response.data)
             assert 'ready' in data
@@ -124,7 +122,7 @@ class TestReadyReadiness:
 
     def test_ready_response_format_failure(self, flask_test_client):
         """GET /ready (failure) should have ready and reason fields."""
-        with patch('openspace.mcp_server._is_ready', return_value=False):
+        with patch('openspace.runtime_state.get_is_ready', return_value=False):
             response = flask_test_client.get('/ready')
             data = json.loads(response.data)
             assert 'ready' in data
@@ -290,7 +288,7 @@ class TestGracefulShutdown:
 
     def test_ready_returns_false_during_shutdown(self, flask_test_client):
         """GET /ready should return 503 when shutdown is in progress."""
-        with patch('openspace.mcp_server._is_ready', return_value=False):
+        with patch('openspace.runtime_state.get_is_ready', return_value=False):
             response = flask_test_client.get('/ready')
             assert response.status_code == 503
             data = json.loads(response.data)
