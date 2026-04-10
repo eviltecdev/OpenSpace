@@ -306,6 +306,7 @@ class OpenSpace:
         workspace_dir: Optional[str] = None,
         max_iterations: Optional[int] = None,
         task_id: Optional[str] = None,
+        capture_skill_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a task with OpenSpace.
@@ -321,6 +322,9 @@ class OpenSpace:
             task_id: External task ID for recording/logging. If None, generates a random one.
                      This allows external callers (e.g., OSWorld) to specify their own task ID
                      so recordings can be easily matched with benchmark results.
+            capture_skill_dir: Preferred directory for CAPTURED skills. In multi-host-agent
+                scenarios, this should be the calling host agent's skill directory so
+                newly captured skills are written to the correct location.
         """
         if not self._initialized:
             raise RuntimeError(
@@ -351,6 +355,7 @@ class OpenSpace:
         self._running = True
         self._task_done.clear()
         self._last_evolved_skills = []  # Reset per-execution tracking
+        self._capture_skill_dir = capture_skill_dir
         start_time = asyncio.get_event_loop().time()
         # Use external task_id if provided, otherwise generate one
         if task_id is None:
@@ -806,7 +811,17 @@ class OpenSpace:
                     for s in analysis.evolution_suggestions
                 )
                 logger.info(f"[Skill Evolution] Suggestions: {evo_summary}")
-                evolved_records = await self._skill_evolver.process_analysis(analysis)
+
+                capture_dir = None
+                if getattr(self, "_capture_skill_dir", None):
+                    from pathlib import Path as _P
+                    _cd = _P(self._capture_skill_dir)
+                    if _cd.is_dir():
+                        capture_dir = _cd
+
+                evolved_records = await self._skill_evolver.process_analysis(
+                    analysis, capture_dir=capture_dir,
+                )
 
                 # Track evolved skills for the caller
                 for rec in evolved_records:
