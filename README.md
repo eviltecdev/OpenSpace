@@ -142,6 +142,7 @@ On 50 professional tasks (**📈 [GDPVal Economic Benchmark](#-benchmark-gdpval)
   - [🌐 Cloud Skill Community](#-cloud-skill-community)
 - [🔧 Advanced Configuration](#-advanced-configuration)
 - [📖 Code Structure](#-code-structure)
+- [🚀 Operations & Deployment](#-operations--deployment)
 - [🤝 Contribute & Roadmap](#-contribute--roadmap)
 - [🔗 Related Projects](#-related-projects)
 
@@ -529,6 +530,28 @@ OpenSpace/
 ```
 
 </details>
+
+---
+
+## 🚀 Operations & Deployment
+
+**Ready to run OpenSpace in production?**
+
+- **[RELEASE_GATE.md](./RELEASE_GATE.md)** — Pre-deployment checklist, known risks, scope limits, and go/no-go criteria
+- **[RUNBOOK.md](./RUNBOOK.md)** — Practical operations guide: start, verify health, monitor, troubleshoot, scale safely
+
+**Key features for production**:
+- HTTP health probes (`/health`, `/ready`, `/status`) for Kubernetes integration
+- Graceful SIGTERM shutdown with active task draining (30s timeout)
+- Rate limiting (3 concurrent execute_task, 5 concurrent search_skills per instance)
+- Cloud status tracking and passive degradation reporting
+- Request correlation IDs for end-to-end log tracing
+
+**Coverage & Limits**:
+- ✅ 775 tests passing (49% code coverage)
+- ✅ Graceful shutdown + concurrent safety verified
+- ⚠️ Per-instance rate limiting only (no cluster-wide coordination)
+- ⚠️ GUI recording requires X11 (headless HTTP probes work fine)
 
 ---
 
