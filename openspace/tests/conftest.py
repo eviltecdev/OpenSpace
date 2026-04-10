@@ -51,6 +51,12 @@ def mock_gui_modules_for_headless_ci():
         'accessibility_inspector': MagicMock(),
         'pyatspi': pyatspi_mock,
         'pyxcursor': MagicMock(),
+        # macOS-specific frameworks (prevent objc reload errors)
+        'AppKit': MagicMock(),
+        'atomacos': MagicMock(),
+        'Foundation': MagicMock(),
+        'Quartz': MagicMock(),
+        'objc': MagicMock(),
     }
 
     # Patch sys.modules with these mocks

@@ -49,8 +49,9 @@ class TestPathValidation:
         """Temporary directory paths should be allowed."""
         test_path = "/tmp/test.txt"
 
-        # Verify path is within /tmp
-        is_allowed = os.path.realpath(test_path).startswith("/tmp")
+        # Verify path is within /tmp (or /private/tmp on macOS)
+        real_path = os.path.realpath(test_path)
+        is_allowed = real_path.startswith("/tmp") or real_path.startswith("/private/tmp")
         assert is_allowed
 
     def test_validate_reject_etc_path(self):

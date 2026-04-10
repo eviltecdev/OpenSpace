@@ -329,7 +329,8 @@ class TestPathValidation:
         expanded = os.path.expanduser(path)
 
         assert "~" not in expanded
-        assert expanded.startswith("/home")
+        # macOS uses /Users/username, Linux uses /home/username
+        assert expanded.startswith("/home") or expanded.startswith("/Users")
 
 
 # ============================================================================
