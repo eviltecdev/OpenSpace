@@ -480,24 +480,39 @@ export class DevOpsPanel extends Panel {
       try { hostname = new URL(hostname).hostname; } catch { /* keep raw */ }
       const detail = isUp ? `${r.status} OK · ${r.latencyMs}ms` : isDown ? escapeHtml(r.error || 'Connection failed') : '';
 
+      const openUrl = r.url || probes[i] || '';
+      const isSsh = r.status === 22 || openUrl.startsWith('ssh://') || /^[\d.]+$/.test(hostname);
+      const actionBtn = isSsh
+        ? `<button class="monitor-add-btn" data-copy="${escapeHtml(hostname)}" style="font-size:10px;margin-left:4px;" title="Copy IP">📋</button>`
+        : `<a href="${escapeHtml(openUrl)}" target="_blank" class="monitor-add-btn" style="font-size:10px;margin-left:4px;text-decoration:none;" title="Open in browser">↗</a>`;
       return `
       <div class="jm-row">
         <span class="jm-icon">${icon}</span>
         <div class="jm-info">
           <div class="jm-label">${escapeHtml(hostname)}</div>
-          <div class="jm-cmd">${escapeHtml(r.url || probes[i] || '')}</div>
+          <div class="jm-cmd">${escapeHtml(openUrl)}${isSsh ? ' · SSH' : ''}</div>
           ${detail ? `<div class="jm-cmd" style="margin-top:2px;color:${statusColor}">${detail}</div>` : ''}
         </div>
         <div class="jm-stats">
           <span class="jm-status" style="color:${statusColor}">● ${statusText}</span>
           ${isUp && r.latencyMs ? `<span class="jm-duration">${r.latencyMs}ms</span>` : ''}
         </div>
+        ${actionBtn}
         <button class="jm-watch-rm" data-pidx="${i}" style="margin-left:4px" title="Remove">✕</button>
       </div>`;
     }).join('');
 
     this.bodyEl.innerHTML = `${inputHtml}<div class="jm-list">${rows}</div>`;
     this.wireProbe(probes);
+    this.bodyEl.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach(b => {
+      b.addEventListener('click', () => {
+        navigator.clipboard.writeText(b.dataset.copy!).then(() => {
+          const orig = b.textContent;
+          b.textContent = '✓';
+          setTimeout(() => { b.textContent = orig; }, 1500);
+        });
+      });
+    });
     this.bodyEl.querySelectorAll<HTMLButtonElement>('[data-pidx]').forEach(b => {
       b.addEventListener('click', () => {
         probes.splice(parseInt(b.dataset.pidx!, 10), 1);

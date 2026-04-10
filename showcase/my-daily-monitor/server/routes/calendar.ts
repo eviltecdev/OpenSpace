@@ -1,23 +1,13 @@
 /**
- * Calendar API proxy — Google Calendar API v3.
- * Credentials come from request headers (frontend sends from localStorage).
+ * Calendar API proxy — Google Calendar API v3 via App Password.
+ * Credentials come from environment variables or request headers.
  */
 import type { IncomingHttpHeaders } from 'node:http';
 
 const GCAL_API = 'https://www.googleapis.com/calendar/v3';
-const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
-async function getAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<string | null> {
-  try {
-    const resp = await fetch(GOOGLE_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json() as any;
-    return data.access_token || null;
-  } catch { return null; }
+function getBasicAuth(email: string, appPassword: string): string {
+  return 'Basic ' + Buffer.from(`${email}:${appPassword}`).toString('base64');
 }
 
 export async function handleCalendarRequest(
@@ -25,19 +15,15 @@ export async function handleCalendarRequest(
   _body: string,
   headers: IncomingHttpHeaders,
 ): Promise<unknown> {
-  // Read credentials from headers (frontend → localStorage → headers)
-  const clientId = (headers['x-gmail-client-id'] as string) || process.env.GMAIL_CLIENT_ID || '';
-  const clientSecret = (headers['x-gmail-client-secret'] as string) || process.env.GMAIL_CLIENT_SECRET || '';
-  const refreshToken = (headers['x-gmail-token'] as string) || process.env.GMAIL_REFRESH_TOKEN || '';
+  // Read credentials from headers or env
+  const email = (headers['x-gmail-email'] as string) || process.env.GMAIL_EMAIL || '';
+  const appPassword = (headers['x-gmail-app-password'] as string) || process.env.GMAIL_APP_PASSWORD || '';
 
-  if (!clientId || !clientSecret || !refreshToken) {
-    return { events: [], configured: false, message: 'Google Calendar not configured (needs Gmail OAuth credentials)' };
+  if (!email || !appPassword) {
+    return { events: [], configured: false, message: 'Google Calendar not configured (needs Gmail email and app password)' };
   }
 
-  const accessToken = await getAccessToken(clientId, clientSecret, refreshToken);
-  if (!accessToken) {
-    return { events: [], configured: true, error: 'Failed to refresh access token' };
-  }
+  const authHeader = getBasicAuth(email, appPassword);
 
   const calendarId = query.calendarId || 'primary';
   const now = new Date();
@@ -47,7 +33,7 @@ export async function handleCalendarRequest(
   try {
     const resp = await fetch(
       `${GCAL_API}/calendars/${encodeURIComponent(calendarId)}/events?timeMin=${dayStart}&timeMax=${dayEnd}&singleEvents=true&orderBy=startTime&maxResults=20`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { headers: { Authorization: authHeader } },
     );
     if (!resp.ok) throw new Error(`Calendar API: ${resp.status}`);
     const data = await resp.json() as any;

@@ -340,7 +340,8 @@ def _str_arg(name: str, default: str) -> str:
 
 
 def _skill_score(record: SkillRecord) -> float:
-    return round(record.effective_rate * 100, 1)
+    """Convert skill score (0-1) to percentage (0-100)."""
+    return round(record.score * 100, 1)
 
 
 def _serialize_skill(record: SkillRecord, *, include_recent_analyses: bool = False) -> Dict[str, Any]:
@@ -376,9 +377,10 @@ def _sort_skills(records: Iterable[SkillRecord], *, sort_key: str) -> List[Skill
         return sorted(records, key=lambda item: _naive_dt(item.last_updated), reverse=True)
     if sort_key == "name":
         return sorted(records, key=lambda item: item.name.lower())
+    # Default: sort by weighted score (highest first), then by selection count, then by update time
     return sorted(
         records,
-        key=lambda item: (_skill_score(item), item.total_selections, _naive_dt(item.last_updated).timestamp()),
+        key=lambda item: (item.score, item.total_selections, _naive_dt(item.last_updated).timestamp()),
         reverse=True,
     )
 

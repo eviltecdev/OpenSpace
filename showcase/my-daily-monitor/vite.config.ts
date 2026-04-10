@@ -12,6 +12,7 @@ export default defineConfig({
     apiPlugin(),  // Embeds API routes directly — no separate server needed
   ],
   server: {
+    host: '0.0.0.0',
     port: 5173,
   },
 });

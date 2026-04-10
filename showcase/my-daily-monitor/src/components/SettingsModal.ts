@@ -205,6 +205,14 @@ function renderPreferencesTab(container: HTMLElement): void {
       </div>
     </div>
     <div class="settings-group">
+      <div class="settings-group-title">Server Monitoring</div>
+      <div class="settings-row">
+        <label class="settings-label">Server URLs to probe (one per line)</label>
+        <textarea class="settings-textarea" data-pref="serverProbes" rows="5" placeholder="https://your-server.com&#10;https://api.yoursite.net">${p.serverProbes.join('\n')}</textarea>
+        <div class="settings-hint">Servers are pinged and shown on the Global Map as green (UP) or red (DOWN) markers.</div>
+      </div>
+    </div>
+    <div class="settings-group">
       <div class="settings-group-title">AI</div>
       <div class="settings-row">
         <label class="settings-label">Enable AI summaries</label>

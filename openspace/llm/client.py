@@ -224,7 +224,7 @@ async def _summarize_tool_result(
     content: str,
     tool_name: str,
     task: str = "",
-    model: str = "openrouter/anthropic/claude-sonnet-4.5",
+    model: str = "anthropic/claude-haiku-4-5-20251001",
     timeout: float = 120.0,
     litellm_kwargs: Optional[Dict] = None,
 ) -> str:
@@ -294,7 +294,7 @@ async def _tool_result_to_message_async(
     tool_name: str,
     task: str = "",
     summarize_threshold: int = DEFAULT_SUMMARIZE_THRESHOLD_CHARS,
-    summarize_model: str = "openrouter/anthropic/claude-sonnet-4.5",
+    summarize_model: str = "anthropic/claude-haiku-4-5-20251001",
     enable_summarization: bool = True,
     litellm_kwargs: Optional[Dict] = None,
 ) -> Dict:
@@ -399,9 +399,14 @@ async def _execute_tool_call(
 
 class LLMClient:
     """LLMClient class for single round call"""
+
+    # Model constants
+    MODEL_HAIKU = "anthropic/claude-haiku-4-5-20251001"
+    MODEL_SONNET = "anthropic/claude-sonnet-4-6"
+
     def __init__(
-        self, 
-        model: str = "openrouter/anthropic/claude-sonnet-4.5", 
+        self,
+        model: str = "anthropic/claude-haiku-4-5-20251001",
         enable_thinking: bool = False,
         rate_limit_delay: float = 0.0,
         max_retries: int = 3,
@@ -436,7 +441,82 @@ class LLMClient:
         self.litellm_kwargs = litellm_kwargs
         self._logger = Logger.get_logger(__name__)
         self._last_call_time = 0.0
-    
+
+    def model_auto_select(self, task: str) -> tuple[str, str]:
+        """Auto-select model based on task complexity.
+
+        Evaluates task characteristics and determines if Sonnet (complex) or
+        Haiku (simple) should be used. Returns the model and reason.
+
+        Args:
+            task: Task description or full message content
+
+        Returns:
+            (model_id, reason) tuple
+        """
+        if not task or not isinstance(task, str):
+            return self.MODEL_HAIKU, "empty/invalid task → Haiku"
+
+        task_lower = task.lower()
+        task_len = len(task)
+
+        # Check for explicit Sonnet request
+        if "[SONNET]" in task or "[sonnet]" in task_lower:
+            return (
+                self.MODEL_SONNET,
+                "explicit [SONNET] flag → Sonnet",
+            )
+
+        # Heuristic 1: Task length > 2000 chars usually requires better context
+        if task_len > 2000:
+            return (
+                self.MODEL_SONNET,
+                f"long task ({task_len} chars) → Sonnet",
+            )
+
+        # Heuristic 2: Complex reasoning keywords
+        complex_keywords = [
+            r"\b(archit|design pattern|design decision)",
+            r"\b(security|vulnerability|exploit|injection)",
+            r"\b(debug|root cause|troubleshoot|diagnose)",
+            r"\b(refactor|restructure|overhaul)",
+            r"\b(compare|tradeoff|trade-off|alternative)",
+            r"\b(scale|performance|optimize|bottleneck)",
+            r"\b(migrate|upgrade|deprecat)",
+        ]
+
+        import re
+        for pattern in complex_keywords:
+            if re.search(pattern, task_lower):
+                return (
+                    self.MODEL_SONNET,
+                    f"complex keyword matched → Sonnet",
+                )
+
+        # Heuristic 3: Multi-system indicators (multiple files/modules)
+        file_count = task.count("/") + task.count("\\")
+        if file_count > 3:
+            return (
+                self.MODEL_SONNET,
+                f"multi-file task ({file_count} paths) → Sonnet",
+            )
+
+        # Heuristic 4: Code that needs careful review (security, critical)
+        if re.search(
+            r"(auth|permission|role|token|credential|secret|key)",
+            task_lower,
+        ):
+            return (
+                self.MODEL_SONNET,
+                "security-related code → Sonnet",
+            )
+
+        # Default: Haiku for simple/fast tasks
+        return (
+            self.MODEL_HAIKU,
+            "simple task, no complex patterns → Haiku",
+        )
+
     @staticmethod
     def _merge_consecutive_system_messages(messages: List[Dict]) -> List[Dict]:
         """Merge consecutive system messages into one.
@@ -556,6 +636,12 @@ class LLMClient:
                     litellm.acompletion(**completion_kwargs),
                     timeout=self.timeout
                 )
+                # Track OpenAI costs
+                try:
+                    from openspace.llm.cost_tracker import record_cost
+                    record_cost(response, completion_kwargs.get("model", self.model))
+                except Exception:
+                    pass
                 return response
             except asyncio.TimeoutError:
                 self._logger.error(
@@ -618,26 +704,29 @@ class LLMClient:
     
     async def complete(
         self,
-        messages: List[Dict] | str, 
+        messages: List[Dict] | str,
         tools: List[BaseTool] | None = None,
         execute_tools: bool = True,
         summary_prompt: Optional[str] = None,
         tool_result_callback: Optional[callable] = None,
+        auto_select_model: bool = False,
         **kwargs
     ) -> Dict:
         """
         Single-round LLM call with optional tool execution.
-        
+
         Args:
             messages: conversation history (List[Dict] for standard OpenAI format, or str for text format)
             tools: BaseTool instance list (must be obtained from GroundingClient and bound to runtime_info)
                 if None or empty list, only perform conversation, no tools
             execute_tools: if LLM returns tool_calls, whether to automatically execute tools
-            summary_prompt: Optional custom prompt for requesting iteration summary. 
+            summary_prompt: Optional custom prompt for requesting iteration summary.
                 If provided, will request summary after tool execution.
                 If None, no summary will be requested.
             tool_result_callback: Optional async callback to process tool results after execution.
                 Signature: async def callback(result: ToolResult, tool_name: str, tool_call: Dict, backend: str) -> ToolResult
+            auto_select_model: if True, automatically select Haiku or Sonnet based on task complexity.
+                Overrides the model set at __init__
             **kwargs: additional parameters for litellm completion
         """
         # 1. Process messages
@@ -653,18 +742,23 @@ class LLMClient:
             )
         else:
             raise ValueError("messages must be List[Dict] or str")
-        
-        # 2. prepare base litellm completion kwargs
+
+        # 2. Auto-select model if requested
+        request_model = kwargs.get("model", self.model)
+        if auto_select_model:
+            request_model, reason = self.model_auto_select(user_task)
+            self._logger.info(f"[AutoSelect] {reason}")
+
+        # 3. prepare base litellm completion kwargs
         completion_kwargs = {
-            "model": kwargs.get("model", self.model),
+            "model": request_model,
             **self.litellm_kwargs,
         }
-        request_model = completion_kwargs["model"]
-        
+
         # Add thinking/reasoning_effort only if explicitly enabled and not using tools
         enable_thinking = kwargs.get("enable_thinking", self.enable_thinking)
-        
-        # 3. if tools are provided, add them to the request
+
+        # 4. if tools are provided, add them to the request
         llm_tools = None
         tool_map = {}  # llm_name -> BaseTool
         if tools:
@@ -682,25 +776,25 @@ class LLMClient:
         if enable_thinking:
             completion_kwargs["reasoning_effort"] = kwargs.get("reasoning_effort", "medium")
         
-        # 4. Normalize messages for providers with stricter role constraints.
+        # 5. Normalize messages for providers with stricter role constraints.
         current_messages = self._normalize_messages_for_model(
             current_messages,
             request_model,
         )
 
-        # 5. Apply rate limiting
+        # 6. Apply rate limiting
         await self._rate_limit()
-        
-        # 6. Call LLM with retry (single round)
+
+        # 7. Call LLM with retry (single round)
         completion_kwargs["messages"] = current_messages
         response = await self._call_with_retry(**completion_kwargs)
         
         if not response.choices:
             raise ValueError("LLM response has no choices")
-        
+
         response_message = response.choices[0].message
-        
-        # 6. Build assistant message
+
+        # 8. Build assistant message
         assistant_message = {
             "role": "assistant",
             "content": response_message.content or "",
@@ -727,8 +821,8 @@ class LLMClient:
         
         # Add assistant message to conversation
         current_messages.append(assistant_message)
-        
-        # 7. Execute tools if requested
+
+        # 9. Execute tools if requested
         tool_results = []
         if execute_tools and tool_calls and tools:
             self._logger.info(f"Executing {len(tool_calls)} tool calls...")
@@ -832,7 +926,7 @@ class LLMClient:
                     tool_name=tool_name,
                     task=user_task,
                     summarize_threshold=self.summarize_threshold_chars,
-                    summarize_model=self.model,
+                    summarize_model="anthropic/claude-haiku-4-5-20251001",
                     enable_summarization=self.enable_tool_result_summarization,
                     litellm_kwargs=self.litellm_kwargs,
                 )
@@ -848,8 +942,8 @@ class LLMClient:
                 })
             
             self._logger.info(f"Tool execution completed, {len(tool_results)} tools executed")
-        
-        # 8. Request summary if provided and tools were executed
+
+        # 10. Request summary if provided and tools were executed
         iteration_summary = None
         
         if summary_prompt and tool_results:
@@ -887,10 +981,9 @@ class LLMClient:
                     "role": "assistant",
                     "content": iteration_summary
                 })
-                
                 self._logger.debug(f"Generated iteration summary: {iteration_summary[:100]}...")
-                
-        # 9. Return single-round result        
+
+        # 11. Return single-round result        
         return {
             "message": assistant_message,
             "tool_results": tool_results,

@@ -6,6 +6,7 @@
  * Usage: npx tsx server/index.ts
  */
 
+import 'dotenv/config';
 import http from 'node:http';
 import { parse as parseUrl } from 'node:url';
 import { checkAuth } from './auth';

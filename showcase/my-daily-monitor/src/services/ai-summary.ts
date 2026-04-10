@@ -1,6 +1,6 @@
 /**
- * AI Summary service — uses OpenRouter API for LLM-based summarization.
- * Works with any OpenRouter-compatible model (default: free Llama 3.1 8B).
+ * AI Summary service — uses local OpenClaw bot (Claude Sonnet 4.6) as primary,
+ * falls back to OpenRouter if configured.
  */
 
 import { getSecret, getPreferences } from '@/services/settings-store';
@@ -8,12 +8,30 @@ import { getSecret, getPreferences } from '@/services/settings-store';
 const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'minimax/minimax-m2.5';
 
-async function callLLM(systemPrompt: string, userContent: string, maxTokens = 400): Promise<string | null> {
+/** Call via local OpenClaw bot (Claude Sonnet 4.6) */
+async function callOpenClaw(systemPrompt: string, userContent: string): Promise<string | null> {
+  try {
+    const resp = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json() as any;
+    return data.content || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Call via OpenRouter (fallback if API key configured) */
+async function callOpenRouter(systemPrompt: string, userContent: string, maxTokens = 400): Promise<string | null> {
   const apiKey = getSecret('OPENROUTER_API_KEY');
   if (!apiKey) return null;
-
   const model = getSecret('OPENROUTER_MODEL') || DEFAULT_MODEL;
-
   try {
     const resp = await fetch(OPENROUTER_API, {
       method: 'POST',
@@ -32,13 +50,19 @@ async function callLLM(systemPrompt: string, userContent: string, maxTokens = 40
         ],
       }),
     });
-
     if (!resp.ok) return null;
     const data = await resp.json() as any;
     return data.choices?.[0]?.message?.content || null;
   } catch {
     return null;
   }
+}
+
+/** Primary: OpenClaw bot. Fallback: OpenRouter if key set. */
+async function callLLM(systemPrompt: string, userContent: string, maxTokens = 400): Promise<string | null> {
+  const result = await callOpenClaw(systemPrompt, userContent);
+  if (result) return result;
+  return callOpenRouter(systemPrompt, userContent, maxTokens);
 }
 
 /**
@@ -98,45 +122,19 @@ export async function analyzeProcessExit(info: {
   mem: number;
   tailOutput?: string;
 }): Promise<string | null> {
-  const apiKey = getSecret('OPENROUTER_API_KEY');
-  if (!apiKey) return null;
-
-  const model = getSecret('OPENROUTER_MODEL') || DEFAULT_MODEL;
-
   const parts = [
     `Process: ${info.label}`,
     `Command: ${info.command}`,
     `Duration: ${info.duration}`,
     `Last CPU: ${info.cpu.toFixed(1)}%  Last MEM: ${info.mem.toFixed(1)}%`,
   ];
-  if (info.tailOutput) {
-    parts.push(`Last output (tail):\n${info.tailOutput}`);
-  }
+  if (info.tailOutput) parts.push(`Last output (tail):\n${info.tailOutput}`);
 
-  try {
-    const resp = await fetch(OPENROUTER_API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'HTTP-Referer': 'https://my-daily-monitor.local',
-        'X-Title': 'My Daily Monitor',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 200,
-        messages: [
-          { role: 'system', content: 'You are a DevOps assistant. A monitored process just exited. Analyze it in 2-3 concise sentences: was it likely successful or did it crash? Any notable observations from the metrics or output? Use plain text, no markdown.' },
-          { role: 'user', content: parts.join('\n') },
-        ],
-      }),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json() as any;
-    return data.choices?.[0]?.message?.content || null;
-  } catch {
-    return null;
-  }
+  return callLLM(
+    'You are a DevOps assistant. A monitored process just exited. Analyze it in 2-3 concise sentences: was it likely successful or did it crash? Any notable observations from the metrics or output? Use plain text, no markdown.',
+    parts.join('\n'),
+    200,
+  );
 }
 
 /**

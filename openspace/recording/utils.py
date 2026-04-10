@@ -137,39 +137,45 @@ def _format_markdown(trajectory: List[Dict[str, Any]]) -> str:
 def analyze_trajectory(trajectory: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Analyze trajectory and return statistics.
+
+    Uses result.success field (set at execution time) which is more reliable
+    than pattern-matching on output strings.
     """
     if not trajectory:
         return {
             "total_steps": 0,
+            "success_count": 0,
             "success_rate": 0.0,
             "backends": {},
-            "action_types": {}
+            "tools": {}
         }
-    
+
     total_steps = len(trajectory)
     success_count = 0
     backends = {}
-    action_types = {}
-    
+    tools = {}
+
     for step in trajectory:
-        # Count successes
-        if step.get("result", {}).get("status") == "success":
+        # Use result.success field which is set at execution time
+        # (more reliable than checking for "ERROR" in output)
+        result = step.get("result", {})
+        if result.get("success", False):
             success_count += 1
-        
+
         # Count backends
         backend = step.get("backend", "unknown")
         backends[backend] = backends.get(backend, 0) + 1
-        
+
         # Count tool types
         tool = step.get("tool", "unknown")
-        action_types[tool] = action_types.get(tool, 0) + 1
-    
+        tools[tool] = tools.get(tool, 0) + 1
+
     return {
         "total_steps": total_steps,
         "success_count": success_count,
-        "success_rate": success_count / total_steps if total_steps > 0 else 0.0,
+        "success_rate": round(success_count / total_steps if total_steps > 0 else 0.0, 4),
         "backends": backends,
-        "tools": action_types 
+        "tools": tools
     }
 
 
@@ -204,16 +210,23 @@ def load_recording_session(recording_dir: str) -> Dict[str, Any]:
         "statistics": {}
     }
     
+    # Load metadata first to check for migrated statistics
+    metadata_file = recording_path / "metadata.json"
+    if metadata_file.exists():
+        session["metadata"] = load_metadata(str(recording_path))
+
     # Load trajectory
     traj_file = recording_path / "traj.jsonl"
     if traj_file.exists():
         session["trajectory"] = load_trajectory_from_jsonl(str(traj_file))
-        session["statistics"] = analyze_trajectory(session["trajectory"])
-    
-    # Load metadata
-    metadata_file = recording_path / "metadata.json"
-    if metadata_file.exists():
-        session["metadata"] = load_metadata(str(recording_path))
+
+        # Prefer pre-calculated statistics from metadata if available (migrated v2)
+        if session["metadata"] and session["metadata"].get("statistics_v2_migrated"):
+            session["statistics"] = session["metadata"].get("statistics", {})
+            logger.debug(f"Using migrated statistics_v2 from metadata for {recording_dir}")
+        else:
+            # Fallback: analyze trajectory (for new recordings or old ones without migration)
+            session["statistics"] = analyze_trajectory(session["trajectory"])
     
     # Load plans
     plans_dir = recording_path / "plans"

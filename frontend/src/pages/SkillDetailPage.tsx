@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { skillsApi, type SkillDetail, type SkillLineage } from '../api';
@@ -39,38 +39,39 @@ export default function SkillDetailPage() {
   const [drawerError, setDrawerError] = useState<string | null>(null);
   const [originFilter, setOriginFilter] = useState('all');
   const [tagFilter, setTagFilter] = useState('all');
+  const [graphSearchQuery, setGraphSearchQuery] = useState('');
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(0);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   const selectedVersionId = searchParams.get('version');
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const detail = await skillsApi.getSkill(skillId);
-        if (!cancelled) {
-          setSkillClass(detail);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : t('skillDetail.failedToLoad'));
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    if (skillId) {
-      void load();
+  const loadSkill = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    setError(null);
+    try {
+      const detail = await skillsApi.getSkill(skillId);
+      setSkillClass(detail);
+      setLastRefreshed(new Date());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('skillDetail.failedToLoad'));
+    } finally {
+      if (!silent) setLoading(false);
     }
-
-    return () => {
-      cancelled = true;
-    };
   }, [skillId, t]);
+
+  useEffect(() => {
+    if (skillId) {
+      void loadSkill();
+    }
+  }, [skillId, loadSkill]);
+
+  useEffect(() => {
+    if (autoRefreshInterval <= 0) return;
+    const id = window.setInterval(() => {
+      void loadSkill(true);
+    }, autoRefreshInterval * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [autoRefreshInterval, loadSkill]);
 
   const lineageGraph = useMemo(() => resolveLineageGraph(skillClass), [skillClass]);
 
@@ -295,18 +296,48 @@ export default function SkillDetailPage() {
             <div className="text-xs uppercase tracking-[0.16em] text-muted">{t('skillDetail.evolutionGraph')}</div>
             <h2 className="text-2xl font-bold font-serif mt-1">{t('skillDetail.versionLineage')}</h2>
           </div>
-          <SkillVersionFilterBar
-            originFilter={originFilter}
-            onOriginFilterChange={setOriginFilter}
-            tagFilter={tagFilter}
-            onTagFilterChange={setTagFilter}
-            allOrigins={allOrigins}
-            allTags={allTags}
-          />
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              value={graphSearchQuery}
+              onChange={(e) => setGraphSearchQuery(e.target.value)}
+              placeholder={t('skillDetail.searchNodes')}
+              className="px-2.5 py-1 text-sm min-w-[180px]"
+            />
+            <SkillVersionFilterBar
+              originFilter={originFilter}
+              onOriginFilterChange={setOriginFilter}
+              tagFilter={tagFilter}
+              onTagFilterChange={setTagFilter}
+              allOrigins={allOrigins}
+              allTags={allTags}
+            />
+            <div className="flex items-center gap-2 text-sm">
+              <label className="font-medium text-muted">{t('skillDetail.autoRefresh')}</label>
+              <select
+                value={autoRefreshInterval}
+                onChange={(e) => setAutoRefreshInterval(Number(e.target.value))}
+                className="border border-[color:var(--color-ink)] bg-transparent px-2 py-1 text-sm"
+              >
+                <option value={0}>{t('skillDetail.refreshOff')}</option>
+                <option value={1}>1 min</option>
+                <option value={5}>5 min</option>
+                <option value={10}>10 min</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => void loadSkill(true)}
+                className="px-2 py-1 text-xs border border-[color:var(--color-border-dark)] rounded hover:bg-[color:var(--color-surface)] transition-colors cursor-pointer bg-transparent text-ink"
+                title={lastRefreshed ? t('skillDetail.lastRefreshed', { time: lastRefreshed.toLocaleTimeString() }) : undefined}
+              >
+                ↺
+              </button>
+            </div>
+          </div>
         </div>
         <SkillEvolutionGraph
           graphData={graphData}
           selectedNodeId={selectedVersionId}
+          searchQuery={graphSearchQuery}
           onNodeClick={(node) => openVersion(node.id)}
           onBackgroundClick={closeDrawer}
         />

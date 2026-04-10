@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import NotificationPanel from '../components/NotificationPanel';
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   isActive
@@ -15,7 +16,7 @@ export default function MainLayout() {
 
   return (
     <div className="h-screen min-w-[1180px] relative flex flex-col overflow-x-auto overflow-y-hidden bg-bg-page text-ink">
-      <nav className="relative z-10 flex justify-between items-center px-4 py-3 border-b border-[color:var(--color-border)] bg-bg-page">
+      <nav className="relative z-20 flex justify-between items-center px-4 py-3 border-b border-[color:var(--color-border)] bg-bg-page">
         <div className="flex items-center gap-8">
           <div className="font-bold text-3xl tracking-tighter font-serif">OpenSpace</div>
           <div className="flex gap-4 text-sm">
@@ -30,7 +31,8 @@ export default function MainLayout() {
             </NavLink>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <NotificationPanel />
           <button
             type="button"
             onClick={toggleLang}

@@ -44,5 +44,5 @@ export async function fetchCalendarResult(): Promise<CalendarResult> {
     return { events: (data.events || []) as CalendarEvent[], configured: true };
   } catch (err: any) {
     return { events: [], configured: true, error: err.message };
-}
+  }
 }

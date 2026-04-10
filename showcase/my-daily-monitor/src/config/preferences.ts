@@ -22,6 +22,8 @@ export interface UserPreferences {
   calendarIds: string[];
   // Email filter labels
   emailLabels: string[];
+  // Server monitoring (URLs to probe and show on global map)
+  serverProbes: string[];
   // General
   refreshIntervalMs: number;
   aiSummaryEnabled: boolean;
@@ -45,7 +47,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   socialKeywords: [],
   calendarIds: ['primary'],
   emailLabels: ['INBOX'],
+  serverProbes: ['72.60.74.232', '187.77.113.83'],
   refreshIntervalMs: 60_000,
-  aiSummaryEnabled: false,
+  aiSummaryEnabled: true,
 };
 

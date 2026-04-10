@@ -397,6 +397,31 @@ class SkillRecord:
         """Ratio of selections that fell back (skill unusable signal)."""
         return self.total_fallbacks / self.total_selections if self.total_selections else 0.0
 
+    @property
+    def score(self) -> float:
+        """Weighted quality score: balances effectiveness, adoption, and reliability.
+
+        Formula:
+          score = (effective_rate × 0.5) + (applied_rate × 0.3) + ((1 - fallback_rate) × 0.2)
+
+        Rationale:
+          - effective_rate (50%): Primary goal — selected → applied → completed
+          - applied_rate (30%):   Trust signal — does the system actually use this skill?
+          - reliability (20%):    Error prevention — does it reduce fallbacks?
+
+        This avoids harshly penalizing skills with low usage (e.g., newly created skills).
+        A skill with 0 selections gets score=0, but a skill with 1 selection that fails
+        doesn't get permanently stuck at 0% — applied_rate and reliability still matter.
+        """
+        if self.total_selections == 0:
+            return 0.0
+        return round(
+            (self.effective_rate * 0.5) +
+            (self.applied_rate * 0.3) +
+            ((1.0 - self.fallback_rate) * 0.2),
+            4
+        )
+
     # NOTE: Counter updates (total_selections, total_applied, etc.) are
     # performed atomically in SQL by SkillStore.record_analysis().
     # Do NOT duplicate that logic here in Python.

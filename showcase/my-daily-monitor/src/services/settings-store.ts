@@ -16,11 +16,27 @@ export const PREFS_CHANGED_EVENT = 'mdm-prefs-changed';
 
 // ---- Secrets ----
 
+const DEFAULT_SECRETS: Record<string, string> = {
+  // SECURITY: No hardcoded credentials. All secrets must be configured by user
+  // via the settings UI. See settings panel for: FINNHUB_API_KEY, GITHUB_PAT,
+  // GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN
+  GOOGLE_CALENDAR_ENABLED: 'false',
+  WEATHER_LAT: '-8.8295',
+  WEATHER_LON: '115.0842',
+  WEATHER_CITY: 'Uluwatu',
+};
+
 function loadSecrets(): Record<string, string> {
   try {
     const raw = localStorage.getItem(SECRETS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
+    const stored = raw ? JSON.parse(raw) : {};
+    // Filter out empty strings so DEFAULT_SECRETS are not overridden with empty values
+    const filtered: Record<string, string> = {};
+    for (const [k, v] of Object.entries(stored)) {
+      if (typeof v === 'string' && v.trim()) filtered[k] = v;
+    }
+    return { ...DEFAULT_SECRETS, ...filtered };
+  } catch { return { ...DEFAULT_SECRETS }; }
 }
 
 function saveSecrets(secrets: Record<string, string>): void {
@@ -68,7 +84,15 @@ function loadPrefs(): UserPreferences {
   try {
     const raw = localStorage.getItem(PREFS_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_PREFERENCES };
-    return { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) };
+    const stored = JSON.parse(raw);
+    const merged = { ...DEFAULT_PREFERENCES, ...stored };
+    // For array fields: if stored is empty, fall back to defaults so new default entries take effect
+    const arrayFields = ['serverProbes', 'githubRepos', 'feishuChatIds', 'stockWatchlist',
+      'newsCategories', 'newsKeywords', 'socialKeywords', 'calendarIds', 'emailLabels'] as const;
+    for (const field of arrayFields) {
+      if (!stored[field]?.length) merged[field] = DEFAULT_PREFERENCES[field] as never;
+    }
+    return merged;
   } catch { return { ...DEFAULT_PREFERENCES }; }
 }
 

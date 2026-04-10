@@ -1,23 +1,13 @@
 /**
- * Email API proxy — Gmail API via OAuth refresh token.
- * Credentials come from request headers (set by frontend from localStorage).
+ * Email API proxy — Gmail API via App Password.
+ * Credentials come from environment variables or request headers.
  */
 import type { IncomingHttpHeaders } from 'node:http';
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1';
-const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
-async function getGmailAccessToken(clientId: string, clientSecret: string, refreshToken: string): Promise<string | null> {
-  try {
-    const resp = await fetch(GOOGLE_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json() as any;
-    return data.access_token || null;
-  } catch { return null; }
+function getBasicAuth(email: string, appPassword: string): string {
+  return 'Basic ' + Buffer.from(`${email}:${appPassword}`).toString('base64');
 }
 
 export async function handleEmailRequest(
@@ -25,19 +15,15 @@ export async function handleEmailRequest(
   _body: string,
   headers: IncomingHttpHeaders,
 ): Promise<unknown> {
-  // Read ALL credentials from request headers (frontend sends from localStorage)
-  const clientId = (headers['x-gmail-client-id'] as string) || process.env.GMAIL_CLIENT_ID || '';
-  const clientSecret = (headers['x-gmail-client-secret'] as string) || process.env.GMAIL_CLIENT_SECRET || '';
-  const refreshToken = (headers['x-gmail-token'] as string) || process.env.GMAIL_REFRESH_TOKEN || '';
+  // Read credentials from headers or env
+  const email = (headers['x-gmail-email'] as string) || process.env.GMAIL_EMAIL || '';
+  const appPassword = (headers['x-gmail-app-password'] as string) || process.env.GMAIL_APP_PASSWORD || '';
 
-  if (!clientId || !clientSecret || !refreshToken) {
-    return { emails: [], configured: false, message: 'Gmail OAuth not configured — need Client ID, Client Secret, and Refresh Token' };
+  if (!email || !appPassword) {
+    return { emails: [], configured: false, message: 'Gmail App Password not configured — need email and app password' };
   }
 
-  const accessToken = await getGmailAccessToken(clientId, clientSecret, refreshToken);
-  if (!accessToken) {
-    return { emails: [], configured: true, error: 'Failed to refresh access token. Check Client ID, Secret, and Refresh Token.' };
-  }
+  const authHeader = getBasicAuth(email, appPassword);
 
   const maxResults = query.maxResults || '15';
   const q = query.q || 'is:unread';
@@ -45,7 +31,7 @@ export async function handleEmailRequest(
   try {
     const listResp = await fetch(
       `${GMAIL_API}/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(q)}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { headers: { Authorization: authHeader } },
     );
     if (!listResp.ok) throw new Error(`Gmail list: ${listResp.status}`);
     const listData = await listResp.json() as any;
@@ -55,7 +41,7 @@ export async function handleEmailRequest(
       messageIds.slice(0, 15).map(async (id) => {
         const resp = await fetch(
           `${GMAIL_API}/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-          { headers: { Authorization: `Bearer ${accessToken}` } },
+          { headers: { Authorization: authHeader } },
         );
         if (!resp.ok) return null;
         const msg = await resp.json() as any;

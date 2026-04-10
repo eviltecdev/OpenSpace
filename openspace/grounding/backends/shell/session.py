@@ -555,13 +555,13 @@ When you encounter an UNRECOVERABLE error that you cannot fix, end your response
                     )
 
                 feedback = self._generate_feedback(execution_result, iteration, last_error)
-                
+
                 conversation_history.extend([
                     {"role": "assistant", "content": assistant_content},
                     {"role": "user", "content": feedback}
                 ])
-                
-                last_error = execution_result if "ERROR" in execution_result else None
+
+                last_error = execution_result if self._has_execution_error(execution_result) else None
                 
             except Exception as e:
                 final_message = f"Tool execution failed at step {iteration}: {str(e)}"
@@ -616,7 +616,7 @@ When you encounter an UNRECOVERABLE error that you cannot fix, end your response
                 return code_info, execution_result
             
             execution_result = self._extract_output(result)
-            code_info["status"] = "success" if "ERROR" not in execution_result else "error"
+            code_info["status"] = "error" if self._has_execution_error(execution_result) else "success"
             return code_info, execution_result
             
         except Exception as e:
@@ -626,8 +626,8 @@ When you encounter an UNRECOVERABLE error that you cannot fix, end your response
 
     def _generate_feedback(self, result: str, iteration: int, last_error: str) -> str:
         feedback = f"Step {iteration} result:\n{result}\n\n"
-        
-        if "ERROR" in result:
+
+        if self._has_execution_error(result):
             if last_error and last_error == result:
                 feedback += "Same error as previous step. Try a different approach.\n"
             else:

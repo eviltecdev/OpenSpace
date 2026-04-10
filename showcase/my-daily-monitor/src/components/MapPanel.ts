@@ -77,6 +77,7 @@ export class MapPanel extends Panel {
   private mapContainer: HTMLElement;
   private map: any = null;
   private markers: MapMarker[] = [];
+  private stickyMarkers: MapMarker[] = []; // never cleared by setMarkers
   private markerEls: any[] = [];
   private mapReady = false;
 
@@ -89,9 +90,18 @@ export class MapPanel extends Panel {
     this.content.style.position = 'relative';
 
     this.mapContainer = document.createElement('div');
-    this.mapContainer.style.cssText = 'width:100%;height:100%;min-height:200px;';
+    this.mapContainer.style.flex = '1';
+    this.mapContainer.style.minHeight = '0';
+
     this.content.innerHTML = '';
+    this.content.style.padding = '0';
+    this.content.style.overflow = 'hidden';
+    this.content.style.display = 'flex';
+    this.content.style.flexDirection = 'column';
     this.content.appendChild(this.mapContainer);
+
+    // Allow map drag/pan. Scroll zoom disabled in map constructor.
+    // Page scroll works outside map area.
 
     // Legend overlay
     this.legendEl = document.createElement('div');
@@ -138,8 +148,19 @@ export class MapPanel extends Panel {
         center: [20, 30],
         zoom: 1.8,
         attributionControl: false,
+        scrollZoom: false,
       });
       this.map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
+
+    // Home button — appended to content (position:relative), not mapContainer
+    const homeBtn = document.createElement('button');
+    homeBtn.title = 'Zurück zur Weltansicht';
+    homeBtn.style.cssText = 'position:absolute;top:8px;left:8px;z-index:10;background:rgba(26,26,46,0.9);border:1px solid #444;color:#fff;border-radius:4px;width:28px;height:28px;cursor:pointer;font-size:14px;line-height:1;';
+    homeBtn.textContent = '🌍';
+    homeBtn.addEventListener('click', () => {
+      this.map.flyTo({ center: [20, 30], zoom: 1.8, duration: 800 });
+    });
+    this.content.appendChild(homeBtn);
       this.map.on('load', () => {
         this.mapReady = true;
         this.setDataBadge('live');
@@ -152,9 +173,20 @@ export class MapPanel extends Panel {
   }
 
   public setMarkers(markers: MapMarker[]): void {
-    this.markers = markers;
-    this.setCount(markers.length);
+    // Merge sticky markers — they survive every setMarkers call
+    const merged = [...markers];
+    for (const s of this.stickyMarkers) {
+      if (!merged.find(m => m.id === s.id)) merged.push(s);
+    }
+    this.markers = merged;
+    this.setCount(merged.length);
     if (this.mapReady) this.renderMarkers();
+  }
+
+  public addStickyMarker(marker: MapMarker): void {
+    this.stickyMarkers = this.stickyMarkers.filter(m => m.id !== marker.id);
+    this.stickyMarkers.push(marker);
+    this.addMarker(marker);
   }
 
   public addMarker(marker: MapMarker): void {
@@ -176,23 +208,29 @@ export class MapPanel extends Panel {
       const color = m.color || this.getColor(m.type);
       const size = m.type === 'alert' ? 14 : m.type === 'activity' ? 12 : 10;
 
+      // Outer wrapper: zero-size, no transform — MapLibre uses this for positioning
       const el = document.createElement('div');
-      el.style.cssText = `width:${size}px;height:${size}px;background:${color};border-radius:50%;border:1.5px solid rgba(255,255,255,0.4);cursor:pointer;box-shadow:0 0 8px ${color};transition:transform 0.15s;`;
-      if (m.pulse || m.type === 'alert') {
-        el.style.animation = 'map-marker-pulse 2s ease-in-out infinite';
-      }
+      el.style.cssText = 'width:0;height:0;cursor:pointer;';
       el.title = m.title;
-      el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.8)'; });
-      el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; });
+
+      // Inner dot: visuals + hover scale — isolated from MapLibre's transform
+      const dot = document.createElement('div');
+      dot.style.cssText = `width:${size}px;height:${size}px;background:${color};border-radius:50%;border:1.5px solid rgba(255,255,255,0.4);box-shadow:0 0 8px ${color};transition:transform 0.15s;transform:translate(-50%,-50%);`;
+      if (m.pulse || m.type === 'alert') {
+        dot.style.animation = 'map-marker-pulse 2s ease-in-out infinite';
+      }
+      el.appendChild(dot);
+      el.addEventListener('mouseenter', () => { dot.style.transform = 'translate(-50%,-50%) scale(1.8)'; });
+      el.addEventListener('mouseleave', () => { dot.style.transform = 'translate(-50%,-50%) scale(1)'; });
 
       const typeLabel = this.getTypeLabel(m.type);
       const popup = new maplibregl.Popup({ offset: 12, closeButton: false, maxWidth: '260px' })
         .setHTML(`
-          <div style="font-family:var(--font-body);font-size:11px;line-height:1.4;">
+          <div style="font-family:var(--font-body);font-size:11px;line-height:1.4;color:#111;">
             <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:${color};margin-bottom:3px;">${typeLabel}</div>
-            <div style="font-weight:600;margin-bottom:4px;">${m.title}</div>
-            ${m.description ? `<div style="color:#aaa;font-size:10px;">${m.description}</div>` : ''}
-            ${m.url ? `<a href="${m.url}" target="_blank" style="color:#3b82f6;font-size:10px;">Open →</a>` : ''}
+            <div style="font-weight:600;margin-bottom:4px;color:#111;">${m.title}</div>
+            ${m.description ? `<div style="color:#444;font-size:10px;margin-bottom:3px;">${m.description}</div>` : ''}
+            ${m.url ? `<a href="${m.url}" target="_blank" style="color:#1d4ed8;font-size:10px;font-weight:600;">Open →</a>` : ''}
           </div>
         `);
 

@@ -29,7 +29,7 @@ export async function fetchEmailResult(): Promise<EmailResult> {
   }
 
   try {
-    const resp = await fetch('/api/emails?maxResults=15&q=is:unread', {
+    const resp = await fetch('/api/emails?maxResults=15', {
       headers: {
         'X-Gmail-Client-Id': clientId,
         'X-Gmail-Client-Secret': clientSecret,

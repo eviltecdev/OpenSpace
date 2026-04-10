@@ -1,8 +1,19 @@
 """Automatic model router for OpenSpace.
 
+DEPRECATED: This module is deprecated in favor of LLMClient.model_auto_select().
+
 Classifies tasks by keyword patterns and routes them to the most
 suitable LLM — Claude Sonnet for complex reasoning/code, GPT-4o-mini
 for creative/general tasks, Claude Haiku for simple/quick requests.
+
+For new code, use:
+    client = LLMClient()
+    result = await client.complete(
+        messages=task_text,
+        auto_select_model=True,  # Automatically selects Haiku or Sonnet
+    )
+
+This module is kept for backward compatibility.
 """
 
 from __future__ import annotations
@@ -75,7 +86,7 @@ _GPT_MINI_PATTERNS = re.compile(
 )
 
 # Long tasks (> N chars) should use Claude for better context handling
-_LONG_TASK_THRESHOLD = 500
+_LONG_TASK_THRESHOLD = 2000
 
 
 def route_task(

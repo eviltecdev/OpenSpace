@@ -204,7 +204,7 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'processes',
-    keywords: ['process', 'cpu', 'memory', 'running', 'terminal', 'system', 'server', '进程', '终端', '系统', '服务器', 'health'],
+    keywords: ['process', 'cpu', 'memory', 'running', 'terminal', 'system', 'server', '进程', '终端', '系统', '服务器', 'health', 'bot', 'bots', 'pm2', 'dienst', 'prozess', 'läuft', 'online', 'status'],
     fetch: async () => {
       const parts: string[] = [];
       // System health
@@ -291,15 +291,55 @@ export class InsightsPanel extends Panel {
   private chatEl: HTMLElement | null = null;
   private inputEl: HTMLInputElement | null = null;
   private isProcessing = false;
+  private lastSyncTimestamp = '';
+  private syncInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    super({ id: 'insights', title: 'AI Agent', showCount: false, className: 'panel-wide' });
+    super({ id: 'insights', title: 'OpenClaw', showCount: false, className: 'panel-wide' });
     this.content.style.padding = '0';
     this.content.style.display = 'flex';
     this.content.style.flexDirection = 'column';
     this.messages = loadHistory();
     this.tasks = loadTasks();
+    // Set lastSyncTimestamp to now so we only get new messages going forward
+    this.lastSyncTimestamp = new Date().toISOString();
     this.buildUI();
+    this.startTelegramSync();
+  }
+
+  private startTelegramSync(): void {
+    this.syncInterval = setInterval(() => this.syncFromTelegram(), 5_000);
+  }
+
+  private async syncFromTelegram(): Promise<void> {
+    if (this.isProcessing) return;
+    try {
+      const resp = await fetch(`/api/telegram-history?since=${encodeURIComponent(this.lastSyncTimestamp)}`);
+      if (!resp.ok) return;
+      const data = await resp.json() as any;
+      const incoming: Array<{ role: string; timestamp: string; text: string }> = data.messages || [];
+      if (incoming.length === 0) return;
+
+      let updated = false;
+      for (const msg of incoming) {
+        // Skip if already in messages (by content match)
+        const exists = this.messages.some(m => m.content === msg.text);
+        if (exists) { this.lastSyncTimestamp = msg.timestamp; continue; }
+
+        this.messages.push({
+          role: msg.role === 'user' ? 'user' : 'agent',
+          content: msg.text,
+          timestamp: new Date(msg.timestamp).getTime(),
+        });
+        this.lastSyncTimestamp = msg.timestamp;
+        updated = true;
+      }
+
+      if (updated) {
+        saveHistory(this.messages);
+        this.renderChat();
+      }
+    } catch { /* silent */ }
   }
 
   private buildUI(): void {
@@ -329,7 +369,7 @@ export class InsightsPanel extends Panel {
     if (this.messages.length === 0) {
       this.chatEl.innerHTML = `
         <div class="agent-welcome">
-          <div class="agent-welcome-title">🤖 AI Agent</div>
+          <div class="agent-welcome-title">🦞 OpenClaw</div>
           <div class="agent-welcome-desc">
             Your personal command center — ask me anything.<br>
             <span style="color:var(--text-muted);font-size:11px;">Stocks · News · Weather · Email · Schedule · GitHub · Servers — all at your fingertips.</span>
@@ -368,7 +408,14 @@ export class InsightsPanel extends Panel {
     if (!this.inputEl || !this.inputEl.value.trim() || this.isProcessing) return;
     const text = this.inputEl.value.trim();
     this.inputEl.value = '';
-    this.sendMessage(text);
+    this.inputEl.disabled = true;
+    this.sendMessage(text).finally(() => {
+      if (this.inputEl) {
+        this.inputEl.disabled = false;
+        this.inputEl.focus();
+      }
+      this.isProcessing = false;
+    });
   }
 
   // ======================== Smart tool routing ========================
@@ -454,29 +501,56 @@ export class InsightsPanel extends Panel {
 
       const context = contextParts.join('\n\n');
 
-      // Show tool results
+      // Show brief tool status (not the full raw data dump)
       if (context) {
-        this.messages.push({ role: 'tool', content: context, toolName: toolNames, timestamp: Date.now() });
+        this.messages.push({ role: 'system', content: `⏳ Got data: ${toolNames}`, timestamp: Date.now() });
         this.renderChat();
       }
 
-      // Step 3: Call LLM
-      const apiKey = getSecret('OPENROUTER_API_KEY');
-      if (!apiKey) {
-        this.messages.push({
-          role: 'agent',
-          content: context
-            ? `Here's the data I gathered:\n\n${context}\n\n💡 Add an OpenRouter API key in Settings → API Keys → AI section to get intelligent analysis.`
-            : '⚠ No API key configured and no relevant data found. Go to Settings → API Keys → AI to add an OpenRouter key.',
-          timestamp: Date.now(),
-        });
-      } else {
-        const model = getSecret('OPENROUTER_MODEL') || DEFAULT_MODEL;
-        const isTask = text.startsWith('/task');
-        const taskPrompt = isTask
-          ? '\n\nThe user wants you to CREATE CONTENT. Produce complete, usable output (not just an outline). If it\'s a PPT, write full slide content with titles, bullet points, and speaker notes.'
-          : '';
+      // Step 3: Call LLM — OpenClaw bot primary, OpenRouter fallback
+      const isTask = text.startsWith('/task');
+      const taskPrompt = isTask
+        ? '\n\nThe user wants you to CREATE CONTENT. Produce complete, usable output (not just an outline). If it\'s a PPT, write full slide content with titles, bullet points, and speaker notes.'
+        : '';
 
+      // Try OpenClaw first (with 35s timeout)
+      let reply: string | null = null;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 35_000);
+        const clawResp = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemPrompt: SYSTEM_PROMPT + taskPrompt,
+            messages: [{ role: 'user', content: `Context data:\n${context || 'No data available.'}\n\nUser: ${text.replace(/^\/task\s*/i, '')}` }],
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (clawResp.ok) {
+          const clawData = await clawResp.json() as any;
+          reply = clawData.content || null;
+        }
+      } catch { /* fall through to OpenRouter */ }
+
+      // Fallback: OpenRouter
+      if (!reply) {
+        const apiKey = getSecret('OPENROUTER_API_KEY');
+        if (!apiKey) {
+          this.messages.push({
+            role: 'agent',
+            content: context
+              ? `Here's the data I gathered:\n\n${context}\n\n💡 OpenClaw bot unavailable. Add an OpenRouter API key in Settings → API Keys → AI section as fallback.`
+              : '⚠ OpenClaw bot unavailable and no OpenRouter key configured. Go to Settings → API Keys → AI to add a fallback key.',
+            timestamp: Date.now(),
+          });
+          saveHistory(this.messages);
+          this.isProcessing = false;
+          this.renderChat();
+          return;
+        }
+        const model = getSecret('OPENROUTER_MODEL') || DEFAULT_MODEL;
         const resp = await fetch(OPENROUTER_API, {
           method: 'POST',
           headers: {
@@ -494,10 +568,12 @@ export class InsightsPanel extends Panel {
             ],
           }),
         });
-
         if (!resp.ok) throw new Error(`LLM API ${resp.status}`);
         const data = await resp.json() as any;
-        const reply = data.choices?.[0]?.message?.content || 'No response from AI.';
+        reply = data.choices?.[0]?.message?.content || 'No response from AI.';
+      }
+
+      if (reply !== null) {
 
         // Detect Python code blocks and execute them
         const codeMatch = reply.match(/```python\n([\s\S]*?)```/);
@@ -552,10 +628,10 @@ export class InsightsPanel extends Panel {
           // Normal text response (no code)
           if (isTask) {
             const taskTitle = text.replace(/^\/task\s*/i, '').slice(0, 60);
-            this.tasks.unshift({ id: `t-${Date.now()}`, title: taskTitle, content: reply, status: 'done', createdAt: new Date().toISOString() });
+            this.tasks.unshift({ id: `t-${Date.now()}`, title: taskTitle, content: reply!, status: 'done', createdAt: new Date().toISOString() });
             saveTasks(this.tasks);
           }
-          this.messages.push({ role: 'agent', content: reply, timestamp: Date.now() });
+          this.messages.push({ role: 'agent', content: reply!, timestamp: Date.now() });
         }
       }
     } catch (err: any) {
@@ -566,6 +642,12 @@ export class InsightsPanel extends Panel {
     saveHistory(this.messages);
     this.isProcessing = false;
     this.renderChat();
+  }
+
+  // Reset if somehow stuck (safety valve)
+  private resetProcessing(): void {
+    this.isProcessing = false;
+    if (this.inputEl) this.inputEl.disabled = false;
   }
 
   private showTaskList(): void {

@@ -116,7 +116,11 @@
     "versionLineage": "Version lineage",
     "loadingDrawer": "Loading version drawer…",
     "noLineageGraph": "No lineage graph",
-    "noLineageGraphDesc": "This skill does not yet have lineage data to visualize."
+    "noLineageGraphDesc": "This skill does not yet have lineage data to visualize.",
+    "searchNodes": "Search nodes…",
+    "autoRefresh": "Auto-refresh:",
+    "refreshOff": "Off",
+    "lastRefreshed": "Last refreshed at {{time}}"
   },
   "workflows": {
     "title": "Recorded sessions",
@@ -249,5 +253,17 @@
   },
   "format": {
     "noInstruction": "No instruction captured"
+  },
+  "notifications": {
+    "label": "Notifications",
+    "title": "Notifications",
+    "empty": "No notifications yet",
+    "markAllRead": "Mark all read",
+    "serverOffline": "Server Offline",
+    "serverOfflineMsg": "Could not reach the OpenSpace API server.",
+    "serverBack": "Server Online",
+    "serverBackMsg": "The OpenSpace API server is reachable again.",
+    "serverStatus": "Server Status Changed",
+    "serverStatusMsg": "Server reported status: {{status}}"
   }
 }

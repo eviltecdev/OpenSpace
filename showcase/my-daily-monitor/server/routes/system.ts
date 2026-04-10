@@ -7,6 +7,8 @@ import { promisify } from 'node:util';
 import { statSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { assertPathAllowed } from '../path-jail';
+import * as net from 'node:net';
 
 const execAsync = promisify(exec);
 const EXEC_TIMEOUT = 5000;
@@ -48,9 +50,10 @@ export async function handleSystemRequest(
     // ---- Tail a log file (last N lines) ----
     if (action === 'tail') {
       const file = query.file || '';
-      const lines = parseInt(query.lines || '20', 10);
+      const lines = Math.min(parseInt(query.lines || '20', 10), 500); // max 500 lines
       if (!file) return { error: 'No file path', lines: [] };
       try {
+        assertPathAllowed(file); // Path-Jail check
         statSync(file);
         const cmd = process.platform === 'win32'
           ? `powershell -Command "Get-Content -Tail ${lines} '${file}'"`
@@ -66,12 +69,41 @@ export async function handleSystemRequest(
     if (action === 'probe') {
       const urls = (query.urls || '').split(',').map(s => s.trim()).filter(Boolean);
       if (urls.length === 0) return { probes: [] };
+
+      // TCP port check (used for raw IPs and ssh:// entries)
+      const tcpCheck = (host: string, port: number, timeoutMs: number): Promise<boolean> =>
+        new Promise(resolve => {
+          const sock = new net.Socket();
+          sock.setTimeout(timeoutMs);
+          sock.once('connect', () => { sock.destroy(); resolve(true); });
+          sock.once('error', () => { sock.destroy(); resolve(false); });
+          sock.once('timeout', () => { sock.destroy(); resolve(false); });
+          sock.connect(port, host);
+        });
+
+      const isRawIp = (s: string) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
+      const extractHost = (url: string): string => {
+        try { return new URL(url).hostname; } catch { return url; }
+      };
+
       const probes = await Promise.allSettled(
         urls.map(async (url) => {
           const start = Date.now();
           try {
-            const resp = await fetch(url, { signal: AbortSignal.timeout(5000), method: 'HEAD' });
-            return { url, status: resp.status, ok: resp.ok, latencyMs: Date.now() - start };
+            const host = extractHost(url.replace(/^ssh:\/\//, ''));
+            // Raw IP, ssh:// or http(s) pointing to raw IP → TCP check on port 22
+            if (url.startsWith('ssh://') || isRawIp(url) || isRawIp(host)) {
+              const ok = await tcpCheck(host, 22, 5000);
+              return { url, status: ok ? 22 : 0, ok, latencyMs: Date.now() - start, description: ok ? 'SSH port open' : 'SSH unreachable' };
+            }
+            // Named domain → HTTP check, fallback to SSH TCP if HTTP fails
+            try {
+              const resp = await fetch(url, { signal: AbortSignal.timeout(5000), method: 'HEAD' });
+              return { url, status: resp.status, ok: resp.ok, latencyMs: Date.now() - start };
+            } catch {
+              const ok = await tcpCheck(host, 22, 3000);
+              return { url, status: ok ? 22 : 0, ok, latencyMs: Date.now() - start, description: ok ? 'SSH port open' : 'unreachable' };
+            }
           } catch (err: any) {
             return { url, status: 0, ok: false, latencyMs: Date.now() - start, error: err.message };
           }
@@ -338,10 +370,16 @@ function inferLabel(command: string, pattern: string): string {
 async function executePython(code: string): Promise<unknown> {
   if (!code || !code.trim()) return { success: false, error: 'No code provided' };
 
-  // Security: basic safety checks
-  const dangerous = ['import subprocess', 'import shutil', '__import__', 'eval(', 'exec(', 'os.system', 'os.remove', 'rmtree'];
-  for (const d of dangerous) {
-    if (code.includes(d)) return { success: false, error: `Blocked: "${d}" is not allowed for safety` };
+  // Security: allowlist-based approach — only permit safe stdlib imports
+  const allowedImports = /^import\s+(json|math|datetime|re|statistics|collections|itertools|functools|string|textwrap|time)\b/m;
+  const hasImport = /^\s*import\s+\S+/m.test(code) || /^\s*from\s+\S+\s+import/m.test(code);
+  if (hasImport && !allowedImports.test(code)) {
+    return { success: false, error: 'Only safe stdlib imports (json, math, datetime, re, statistics) are allowed.' };
+  }
+  // Block all known dangerous builtins regardless of import
+  const blocked = [/__import__/, /\beval\s*\(/, /\bexec\s*\(/, /\bcompile\s*\(/, /\bopen\s*\(/, /\bgetattr\s*\(/, /\bsetattr\s*\(/];
+  for (const pattern of blocked) {
+    if (pattern.test(code)) return { success: false, error: 'Blocked: unsafe builtin usage detected.' };
   }
 
   // Ensure output directory exists

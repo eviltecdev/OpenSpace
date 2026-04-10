@@ -13,7 +13,10 @@ export type SecretKey =
   | 'FEISHU_APP_SECRET'
   | 'TWITTER_BEARER_TOKEN'
   | 'OPENROUTER_API_KEY'
-  | 'OPENROUTER_MODEL';
+  | 'OPENROUTER_MODEL'
+  | 'WEATHER_LAT'
+  | 'WEATHER_LON'
+  | 'WEATHER_CITY';
 
 export interface SecretMeta {
   key: SecretKey;
@@ -48,6 +51,10 @@ export const SECRET_REGISTRY: SecretMeta[] = [
   // AI
   { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API Key', placeholder: 'sk-or-...', group: 'AI', type: 'password', hint: 'For AI summaries' },
   { key: 'OPENROUTER_MODEL', label: 'AI Model', placeholder: 'minimax/minimax-m2.5', group: 'AI', hint: 'OpenRouter model ID' },
+  // Weather
+  { key: 'WEATHER_LAT', label: 'Weather Latitude', placeholder: '52.52', group: 'Weather', hint: 'e.g. 52.52 for Berlin' },
+  { key: 'WEATHER_LON', label: 'Weather Longitude', placeholder: '13.41', group: 'Weather', hint: 'e.g. 13.41 for Berlin' },
+  { key: 'WEATHER_CITY', label: 'City Name (display only)', placeholder: 'Berlin', group: 'Weather', hint: 'Shown in weather panel' },
 ];
 
 export const SECRET_GROUPS = [...new Set(SECRET_REGISTRY.map(s => s.group))];
