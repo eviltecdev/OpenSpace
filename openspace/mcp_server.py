@@ -87,11 +87,23 @@ _real_stdout = sys.stdout
 # drain stderr. Heavy log/print output during execute_task fills the stderr
 # pipe buffer, blocking this process on write() → deadlock → timeout.
 # Redirect stderr to a log file on Windows to prevent this.
+_stderr_file = None
 if os.name == "nt":
     _stderr_file = open(
         _LOG_DIR / "mcp_stderr.log", "a", encoding="utf-8", buffering=1
     )
     sys.stderr = _stderr_file
+
+    def _close_stderr_file():
+        """Ensure stderr file is closed on exit."""
+        if _stderr_file and not _stderr_file.closed:
+            try:
+                _stderr_file.close()
+            except Exception:
+                pass
+
+    import atexit
+    atexit.register(_close_stderr_file)
 
 sys.stdout = _MCPSafeStdout(_real_stdout, sys.stderr)
 
@@ -123,6 +135,26 @@ _standalone_store = None
 _registered_skill_dirs: set = set()
 
 _UPLOAD_META_FILENAME = ".upload_meta.json"
+
+
+def _sanitize_error_msg(e: Exception, context: str = "error") -> str:
+    """Sanitize exception message to prevent leaking secrets/paths in error responses.
+
+    Preserves error type and message, but removes full tracebacks and
+    environment-specific details that might contain API keys or paths.
+    """
+    error_type = type(e).__name__
+    error_msg = str(e)
+
+    # Truncate very long messages that might contain sensitive dumps
+    if len(error_msg) > 200:
+        error_msg = error_msg[:200] + "..."
+
+    # Basic sanitization: if message contains common secret patterns, truncate
+    if any(pat in error_msg for pat in ["api_key", "OPENAI", "token", "/home/", "/root/"]):
+        error_msg = f"{error_type}: check logs for details"
+
+    return error_msg
 
 
 async def _get_openspace():
@@ -165,6 +197,13 @@ async def _get_openspace():
 
         config_path = build_grounding_config_path()
         model, llm_kwargs = build_llm_kwargs(env_model)
+
+        # Validate that a model was successfully resolved
+        if not model or not model.strip():
+            raise RuntimeError(
+                "No LLM model configured. Set OPENSPACE_MODEL env var or configure "
+                "LLM credentials via ANTHROPIC_API_KEY, OPENAI_API_KEY, or host config."
+            )
 
         _pkg_root = str(Path(__file__).resolve().parent.parent)
         recording_base = workspace or _pkg_root
@@ -532,7 +571,12 @@ def _json_ok(data: Any) -> str:
 
 
 def _json_error(error: Any, **extra) -> str:
-    return json.dumps({"error": str(error), **extra}, ensure_ascii=False)
+    """Format error as JSON, sanitizing sensitive information."""
+    if isinstance(error, Exception):
+        error_msg = _sanitize_error_msg(error)
+    else:
+        error_msg = str(error)
+    return json.dumps({"error": error_msg, **extra}, ensure_ascii=False)
 
 
 # MCP Tools (4 tools)

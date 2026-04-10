@@ -71,6 +71,43 @@ _STORE: SkillStore | None = None
 _API_TOKEN = os.environ.get("OPENSPACE_API_TOKEN", "").strip()
 _PUBLIC_PATHS = {f"{API_PREFIX}/health"}
 
+# Rate limit failed auth attempts: track IP → failure timestamps
+_FAILED_AUTH_ATTEMPTS: Dict[str, List[float]] = {}
+_FAILED_AUTH_LOCK = __import__("threading").Lock()
+
+
+def _check_auth_rate_limit(client_ip: str) -> bool:
+    """Rate limit failed auth attempts: max 5 failures per minute per IP.
+
+    Returns True if the request should be rejected due to rate limit.
+    """
+    with _FAILED_AUTH_LOCK:
+        now = time.time()
+        minute_ago = now - 60
+
+        # Clean old entries (older than 1 minute)
+        if client_ip in _FAILED_AUTH_ATTEMPTS:
+            _FAILED_AUTH_ATTEMPTS[client_ip] = [
+                t for t in _FAILED_AUTH_ATTEMPTS[client_ip] if t > minute_ago
+            ]
+            if not _FAILED_AUTH_ATTEMPTS[client_ip]:
+                del _FAILED_AUTH_ATTEMPTS[client_ip]
+
+        # Check if IP has exceeded limit
+        if client_ip in _FAILED_AUTH_ATTEMPTS:
+            if len(_FAILED_AUTH_ATTEMPTS[client_ip]) >= 5:
+                return True
+
+        return False
+
+
+def _record_failed_auth(client_ip: str) -> None:
+    """Record a failed auth attempt for the given IP."""
+    with _FAILED_AUTH_LOCK:
+        if client_ip not in _FAILED_AUTH_ATTEMPTS:
+            _FAILED_AUTH_ATTEMPTS[client_ip] = []
+        _FAILED_AUTH_ATTEMPTS[client_ip].append(time.time())
+
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=None)
@@ -83,11 +120,20 @@ def create_app() -> Flask:
         path = request.path
         if path in _PUBLIC_PATHS or not path.startswith(API_PREFIX):
             return None  # Public: health check or frontend assets
+
+        client_ip = request.remote_addr or "unknown"
+
+        # Check auth rate limit (prevent brute force)
+        if _check_auth_rate_limit(client_ip):
+            return jsonify({"error": "Too many failed auth attempts. Try again later."}), 429
+
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
+            _record_failed_auth(client_ip)
             return jsonify({"error": "Unauthorized"}), 401
         provided = auth_header[7:].strip()
         if not hmac.compare_digest(_API_TOKEN.encode(), provided.encode()):
+            _record_failed_auth(client_ip)
             return jsonify({"error": "Unauthorized"}), 401
         return None
 

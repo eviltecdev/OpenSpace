@@ -52,11 +52,14 @@ class OpenSpaceClient:
     Args:
         auth_headers: Pre-resolved auth headers (from ``get_openspace_auth``).
         api_base: API base URL (e.g. ``https://open-space.cloud/api/v1``).
+        timeout: HTTP request timeout in seconds (default: 30, min: 5, max: 300).
+                 Can be overridden via OPENSPACE_HTTP_TIMEOUT env var.
     """
 
     _DEFAULT_UA = "OpenSpace-Client/1.0"
+    _DEFAULT_TIMEOUT = 30  # seconds
 
-    def __init__(self, auth_headers: Dict[str, str], api_base: str):
+    def __init__(self, auth_headers: Dict[str, str], api_base: str, timeout: Optional[int] = None):
         if not auth_headers:
             raise CloudError(
                 "No OPENSPACE_API_KEY configured. "
@@ -68,6 +71,14 @@ class OpenSpaceClient:
         }
         self._base = api_base.rstrip("/")
 
+        # Configure timeout from parameter, env var, or default
+        if timeout is None:
+            timeout_env = os.environ.get("OPENSPACE_HTTP_TIMEOUT")
+            timeout = int(timeout_env) if timeout_env else self._DEFAULT_TIMEOUT
+
+        # Validate timeout bounds
+        self._timeout = max(5, min(timeout, 300))  # Clamp to [5, 300] seconds
+
     def _request(
         self,
         method: str,
@@ -75,9 +86,12 @@ class OpenSpaceClient:
         *,
         body: Optional[bytes] = None,
         extra_headers: Optional[Dict[str, str]] = None,
-        timeout: int = 30,
+        timeout: Optional[int] = None,
     ) -> tuple[int, bytes]:
         """Execute HTTP request.  Returns ``(status_code, response_body)``."""
+        if timeout is None:
+            timeout = self._timeout
+
         url = f"{self._base}{path}"
         headers = {**self._headers}
         if extra_headers:
@@ -97,7 +111,7 @@ class OpenSpaceClient:
         except urllib.error.URLError as e:
             raise CloudError(f"Connection failed: {e.reason}")
 
-    def _get_json(self, path: str, timeout: int = 30) -> Dict[str, Any]:
+    def _get_json(self, path: str, timeout: Optional[int] = None) -> Dict[str, Any]:
         _, data = self._request("GET", path, timeout=timeout)
         return json.loads(data.decode("utf-8"))
 

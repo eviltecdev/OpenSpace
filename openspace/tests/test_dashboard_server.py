@@ -25,6 +25,8 @@ def app_with_token(monkeypatch):
     # Patch the module-level _API_TOKEN variable directly
     import openspace.dashboard_server
     monkeypatch.setattr(openspace.dashboard_server, "_API_TOKEN", "test-token-12345")
+    # Clear auth rate limit state for tests
+    monkeypatch.setattr(openspace.dashboard_server, "_FAILED_AUTH_ATTEMPTS", {})
 
     app = create_app()
     app.config["TESTING"] = True
@@ -38,6 +40,8 @@ def app_without_token(monkeypatch):
     # Patch the module-level _API_TOKEN variable to empty string
     import openspace.dashboard_server
     monkeypatch.setattr(openspace.dashboard_server, "_API_TOKEN", "")
+    # Clear auth rate limit state for tests
+    monkeypatch.setattr(openspace.dashboard_server, "_FAILED_AUTH_ATTEMPTS", {})
 
     app = create_app()
     app.config["TESTING"] = True

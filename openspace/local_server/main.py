@@ -29,10 +29,18 @@ def _validate_path(path: str) -> str:
     """Resolve path and ensure it stays within allowed roots.
 
     Raises ValueError if the resolved path escapes the allowed roots,
-    preventing path-traversal attacks (e.g. ../../../../etc/passwd).
+    preventing path-traversal attacks (e.g. ../../../../etc/passwd) and
+    symlink-based escape attempts.
     """
-    resolved = os.path.realpath(os.path.expanduser(path))
-    if not any(resolved.startswith(root) for root in _ALLOWED_ROOTS):
+    expanded = os.path.expanduser(path)
+    resolved = os.path.realpath(expanded)
+
+    # Compare realpath of both resolved path and allowed roots to prevent
+    # symlink-based escape: symlink → parent allowed dir → ../../../etc/passwd
+    resolved_allowed = [os.path.realpath(root) for root in _ALLOWED_ROOTS]
+
+    if not any(resolved.startswith(root + os.sep) or resolved == root
+               for root in resolved_allowed):
         raise ValueError(f"Access denied: path outside allowed directories: {resolved}")
     return resolved
 
@@ -210,7 +218,16 @@ def execute_command():
     data = request.json
     # The 'command' key in the JSON request should contain the command to be executed.
     shell = data.get('shell', False)
-    command = data.get('command', "" if shell else [])
+
+    # Reject shell=True to prevent shell injection attacks.
+    # All commands must be provided as list arguments, never as shell strings.
+    if shell:
+        return jsonify({
+            'status': 'error',
+            'message': 'shell=True is not allowed. Provide command as a list of arguments.'
+        }), 400
+
+    command = data.get('command', [])
     timeout = data.get('timeout', 120)
     
     if isinstance(command, str) and not shell:
@@ -266,7 +283,15 @@ def execute_command_with_verification():
     """Execute command and verify the result based on provided verification criteria"""
     data = request.json
     shell = data.get('shell', False)
-    command = data.get('command', "" if shell else [])
+
+    # Reject shell=True to prevent shell injection attacks.
+    if shell:
+        return jsonify({
+            'status': 'error',
+            'message': 'shell=True is not allowed. Provide command as a list of arguments.'
+        }), 400
+
+    command = data.get('command', [])
     verification = data.get('verification', {})
     max_wait_time = data.get('max_wait_time', 10) # Maximum wait time in seconds
     check_interval = data.get('check_interval', 1) # Check interval in seconds
@@ -341,16 +366,18 @@ def execute_command_with_verification():
             if 'command_success' in verification:
                 verify_cmd = verification['command_success']
                 try:
+                    # Verify command must be a list to prevent shell injection
+                    if isinstance(verify_cmd, str):
+                        verify_cmd = shlex.split(verify_cmd)
                     verify_result = subprocess.run(
                         verify_cmd,
-                        shell=True,
                         capture_output=True,
                         text=True,
                         timeout=5
                     )
                     if verify_result.returncode != 0:
                         verification_passed = False
-                except:
+                except Exception:
                     verification_passed = False
             
             if verification_passed:
@@ -397,7 +424,15 @@ def _get_machine_architecture() -> str:
 def launch_app():
     data = request.json
     shell = data.get("shell", False)
-    command = data.get("command", "" if shell else [])
+
+    # Reject shell=True to prevent shell injection attacks.
+    if shell:
+        return jsonify({
+            'status': 'error',
+            'message': 'shell=True is not allowed. Provide command as a list of arguments.'
+        }), 400
+
+    command = data.get("command", [])
     
     if isinstance(command, str) and not shell:
         command = shlex.split(command)
@@ -873,7 +908,7 @@ def start_recording():
     try:
         # Use platform adapter to start recording
         result = platform_adapter.start_recording(recording_path)
-        
+
         if result['status'] == 'success':
             recording_process = result.get('process')
             logger.info("Recording started successfully")
@@ -887,8 +922,10 @@ def start_recording():
                 'status': 'error',
                 'message': result.get('message', 'Failed to start recording')
             }), 500
-            
+
     except Exception as e:
+        # Ensure recording_process is cleared on exception
+        recording_process = None
         logger.error(f"Failed to start recording: {str(e)}")
         return jsonify({
             'status': 'error',
@@ -913,21 +950,23 @@ def end_recording():
         if platform_adapter and hasattr(platform_adapter, 'stop_recording'):
             result = platform_adapter.stop_recording(recording_process)
             recording_process = None
-            
+
             if result['status'] != 'success':
                 logger.error(f"Failed to stop recording: {result.get('message', 'Unknown error')}")
                 return jsonify(result), 500
         else:
             # Fallback: terminate process directly
-            recording_process.send_signal(signal.SIGINT)
             try:
-                recording_process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                logger.warning("ffmpeg not responding, force terminating")
-                recording_process.kill()
-                recording_process.wait()
-            recording_process = None
-        
+                recording_process.send_signal(signal.SIGINT)
+                try:
+                    recording_process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    logger.warning("ffmpeg not responding, force terminating")
+                    recording_process.kill()
+                    recording_process.wait()
+            finally:
+                recording_process = None
+
         # Check if recording file exists
         # wait for ffmpeg to write the file header
         for _ in range(10):
@@ -941,16 +980,16 @@ def end_recording():
         else:
             logger.error("Recording file is missing or empty")
             return abort(500, description="Recording file is missing or empty")
-            
+
     except Exception as e:
         logger.error(f"Failed to end recording: {str(e)}")
         if recording_process:
             try:
                 recording_process.kill()
                 recording_process.wait()
-            except:
+            except Exception:
                 pass
-            recording_process = None
+        recording_process = None
         return jsonify({
             'status': 'error',
             'message': str(e)

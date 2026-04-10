@@ -1,8 +1,11 @@
 """Rate limiting for MCP server tools."""
 
 import asyncio
+import logging
 import time
 from typing import Optional
+
+logger = logging.getLogger("openspace.mcp_server_limiter")
 
 
 class RateLimiter:
@@ -19,6 +22,10 @@ class RateLimiter:
         """Acquire a rate limit token."""
         async with self._lock:
             if self.active_tasks >= self.max_concurrent:
+                logger.warning(
+                    f"Rate limit: max concurrent ({self.max_concurrent}) exceeded. "
+                    f"Current tasks: {self.active_tasks}"
+                )
                 return False
 
             now = time.time()
@@ -26,6 +33,10 @@ class RateLimiter:
             self.request_times = [t for t in self.request_times if t > minute_ago]
 
             if len(self.request_times) >= self.max_per_minute:
+                logger.warning(
+                    f"Rate limit: max per minute ({self.max_per_minute}) exceeded. "
+                    f"Current requests in last minute: {len(self.request_times)}"
+                )
                 return False
 
             self.active_tasks += 1
