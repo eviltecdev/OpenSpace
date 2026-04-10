@@ -17,20 +17,13 @@ from datetime import datetime
 
 
 # ============================================================================
-# Headless CI GUI Mocking (session-scoped)
+# CRITICAL: Pre-patch GUI modules at conftest load time (BEFORE any imports)
 # ============================================================================
+# This runs when pytest loads conftest.py, before any test or fixture imports.
+# Must happen here, not in a fixture, to catch imports in openspace modules.
 
-@pytest.fixture(scope="session", autouse=True)
-def mock_gui_modules_for_headless_ci():
-    """Mock all X11/GUI modules globally to enable tests on headless CI.
-
-    This fixture runs once per session and patches sys.modules with mocks
-    of GUI libraries (Xlib, pyautogui, gi.repository, pyatspi, etc.).
-    This allows tests that import openspace.local_server.main to run without X11.
-
-    Must be session-scoped and autouse to patch BEFORE any imports.
-    """
-    # Create proper mock structure for pyatspi (needs Accessible, StateType, etc.)
+def _setup_gui_mocks():
+    """Patch sys.modules with GUI library mocks at conftest load time."""
     pyatspi_mock = MagicMock()
     pyatspi_mock.Accessible = type('Accessible', (), {})
     pyatspi_mock.StateType = MagicMock()
@@ -57,13 +50,14 @@ def mock_gui_modules_for_headless_ci():
         'Foundation': MagicMock(),
         'Quartz': MagicMock(),
         'objc': MagicMock(),
+        'CoreFoundation': MagicMock(),
     }
 
-    # Patch sys.modules with these mocks
-    # Note: we don't use patch.dict here because session scope doesn't work with context managers
-    # Instead, we do this at import time
     for module_name, mock_obj in gui_mocks.items():
         sys.modules[module_name] = mock_obj
+
+# Call immediately when conftest.py is loaded
+_setup_gui_mocks()
 
 
 # ============================================================================
