@@ -5,13 +5,59 @@ Provides:
 - Recording test fixtures (pre-built directory structures)
 - Rate limiter state reset
 - MCP server mocking
+- GUI/X11 module mocking for headless CI environments
 """
 
 import json
+import sys
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
+
+
+# ============================================================================
+# Headless CI GUI Mocking (session-scoped)
+# ============================================================================
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_gui_modules_for_headless_ci():
+    """Mock all X11/GUI modules globally to enable tests on headless CI.
+
+    This fixture runs once per session and patches sys.modules with mocks
+    of GUI libraries (Xlib, pyautogui, gi.repository, pyatspi, etc.).
+    This allows tests that import openspace.local_server.main to run without X11.
+
+    Must be session-scoped and autouse to patch BEFORE any imports.
+    """
+    # Create proper mock structure for pyatspi (needs Accessible, StateType, etc.)
+    pyatspi_mock = MagicMock()
+    pyatspi_mock.Accessible = type('Accessible', (), {})
+    pyatspi_mock.StateType = MagicMock()
+    pyatspi_mock.STATE_SHOWING = MagicMock()
+    pyatspi_mock.Registry = MagicMock()
+
+    gui_mocks = {
+        'pyautogui': MagicMock(),
+        'mouseinfo': MagicMock(),
+        'Xlib': MagicMock(),
+        'Xlib.display': MagicMock(),
+        'Xlib.X': MagicMock(),
+        'pynput': MagicMock(),
+        'pynput.keyboard': MagicMock(),
+        'gi': MagicMock(),
+        'gi.repository': MagicMock(),
+        'gi.repository.Atspi': MagicMock(),
+        'accessibility_inspector': MagicMock(),
+        'pyatspi': pyatspi_mock,
+        'pyxcursor': MagicMock(),
+    }
+
+    # Patch sys.modules with these mocks
+    # Note: we don't use patch.dict here because session scope doesn't work with context managers
+    # Instead, we do this at import time
+    for module_name, mock_obj in gui_mocks.items():
+        sys.modules[module_name] = mock_obj
 
 
 # ============================================================================
