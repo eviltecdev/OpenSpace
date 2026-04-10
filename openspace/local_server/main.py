@@ -7,7 +7,7 @@ import time
 import json
 import uuid
 from datetime import datetime
-from flask import Flask, request, jsonify, send_file, abort
+from flask import Flask, request, jsonify, send_file, abort, Response
 import pyautogui
 import threading
 from io import BytesIO
@@ -177,6 +177,7 @@ fi
 
 
 health_checker = None
+_app_startup_time = time.time()
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -196,6 +197,64 @@ def health_check():
         'features': features,
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Kubernetes liveness probe: always 200 if process is running."""
+    return jsonify({'status': 'ok'}), 200
+
+@app.route('/ready', methods=['GET'])
+def ready():
+    """Kubernetes readiness probe: 200 if ready to serve, 503 if not."""
+    try:
+        from openspace.mcp_server import _is_ready
+        is_ready = _is_ready()
+    except (ImportError, AttributeError):
+        # MCP server not initialized; local_server is ready if we got here
+        is_ready = True
+
+    if is_ready:
+        return jsonify({'ready': True, 'reason': None}), 200
+    else:
+        return jsonify({'ready': False, 'reason': 'MCP server not ready or shutting down'}), 503
+
+@app.route('/status', methods=['GET'])
+def status():
+    """Diagnostics endpoint: uptime, initialization state, limiter state, cloud status."""
+    uptime_seconds = time.time() - _app_startup_time
+
+    # Get MCP server state if available
+    openspace_initialized = False
+    execute_task_active = 0
+    search_skills_active = 0
+    cloud_status = 'unknown'
+
+    try:
+        from openspace.mcp_server import (
+            _openspace_instance,
+            execute_task_limiter,
+            search_skills_limiter,
+            _last_cloud_status,
+        )
+        openspace_initialized = (
+            _openspace_instance is not None
+            and _openspace_instance.is_initialized()
+        )
+        execute_task_active = execute_task_limiter.active_tasks
+        search_skills_active = search_skills_limiter.active_tasks
+        cloud_status = _last_cloud_status
+    except (ImportError, AttributeError):
+        pass
+
+    return jsonify({
+        'uptime_seconds': uptime_seconds,
+        'openspace_initialized': openspace_initialized,
+        'limiter': {
+            'execute_task_active': execute_task_active,
+            'search_skills_active': search_skills_active,
+        },
+        'cloud_status': cloud_status,
+    }), 200
 
 @app.route('/platform', methods=['GET'])
 def get_platform():

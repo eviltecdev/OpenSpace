@@ -22,7 +22,9 @@ import inspect
 import json
 import logging
 import os
+import signal
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -31,6 +33,11 @@ from typing import Any, Dict, List, Optional
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     'request_id', default=''
 )
+
+# Operational readiness state
+_startup_time = time.time()
+_shutdown_requested = False
+_last_cloud_status = "unknown"  # Passive: set by _cloud_search_and_import
 
 
 class _MCPSafeStdout:
@@ -464,9 +471,12 @@ async def _cloud_search_and_import(task: str, limit: int = 8) -> tuple[List[Dict
 
     If cloud is unavailable, returns ([], False) so caller can detect degradation.
     """
+    global _last_cloud_status
+
     try:
         normalized_task_query = task.strip()
         if not normalized_task_query:
+            _last_cloud_status = "available"
             return [], True
 
         cloud_client = _get_cloud_client()
@@ -476,6 +486,7 @@ async def _cloud_search_and_import(task: str, limit: int = 8) -> tuple[List[Dict
             limit=min(limit * 2, 300),
         )
         if not cloud_search_results:
+            _last_cloud_status = "available"
             return [], True
 
         public_cloud_hits = [
@@ -500,10 +511,12 @@ async def _cloud_search_and_import(task: str, limit: int = 8) -> tuple[List[Dict
 
         if import_results:
             logger.info(f"Cloud search imported {len(import_results)} skill(s)")
+        _last_cloud_status = "available"
         return import_results, True
 
     except Exception as e:
         logger.warning(f"_cloud_search_and_import failed (cloud unavailable): {e}")
+        _last_cloud_status = "degraded"
         return [], False
 
 
@@ -1083,6 +1096,89 @@ async def upload_skill(
     except Exception as e:
         logger.error(f"upload_skill failed: {e}", exc_info=True)
         return _json_error(e, status="error")
+
+# ============================================================================
+# Operational Readiness Functions
+# ============================================================================
+
+
+def _is_ready() -> bool:
+    """Check if system is ready to serve requests.
+
+    Ready only if:
+    1. OpenSpace is initialized
+    2. Shutdown has NOT been requested
+
+    This is distinct from liveness (process running) and dependency checks.
+    """
+    openspace_ready = _openspace_instance is not None and _openspace_instance.is_initialized()
+    not_shutting_down = not _shutdown_requested
+    return openspace_ready and not_shutting_down
+
+
+def initiate_graceful_shutdown(timeout_seconds: int = 30) -> None:
+    """Initiate graceful shutdown of OpenSpace MCP server.
+
+    Steps:
+    1. Set shutdown flag (new requests return 503)
+    2. Wait for active limiter tasks to drain (with timeout)
+    3. If timeout reached, log warning and continue anyway
+    4. Cleanup resources
+    5. Exit cleanly
+
+    Args:
+        timeout_seconds: Max time to wait for active tasks to drain (default: 30s)
+    """
+    global _shutdown_requested
+    from openspace.mcp_server_limiter import execute_task_limiter, search_skills_limiter
+
+    logger.info("Graceful shutdown initiated")
+    _shutdown_requested = True
+
+    # Wait for active tasks to drain (up to timeout)
+    start_time = time.time()
+    while time.time() - start_time < timeout_seconds:
+        total_active = execute_task_limiter.active_tasks + search_skills_limiter.active_tasks
+        if total_active == 0:
+            logger.info("All active tasks completed, proceeding with shutdown")
+            break
+        time.sleep(0.5)
+    else:
+        # Timeout reached
+        remaining = execute_task_limiter.active_tasks + search_skills_limiter.active_tasks
+        logger.warning(
+            f"Graceful shutdown timeout ({timeout_seconds}s) reached with {remaining} active tasks. "
+            f"Continuing with cleanup anyway."
+        )
+
+    # Cleanup resources
+    try:
+        if _openspace_instance and hasattr(_openspace_instance, '_skill_store'):
+            store = _openspace_instance._skill_store
+            if store and not store._closed:
+                logger.info("Closing SkillStore")
+                store.close()
+    except Exception as e:
+        logger.warning(f"Error during resource cleanup: {e}")
+
+    if _stderr_file and not _stderr_file.closed:
+        try:
+            _stderr_file.close()
+        except Exception:
+            pass
+
+    logger.info("Graceful shutdown complete")
+
+
+def _handle_sigterm(signum, frame):
+    """SIGTERM signal handler. Thin wrapper around graceful shutdown."""
+    initiate_graceful_shutdown(timeout_seconds=30)
+    sys.exit(0)
+
+
+# Register SIGTERM handler for graceful shutdown
+signal.signal(signal.SIGTERM, _handle_sigterm)
+
 
 def run_mcp_server() -> None:
     """Console-script entry point for ``openspace-mcp``."""
