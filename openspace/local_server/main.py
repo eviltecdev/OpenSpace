@@ -207,58 +207,96 @@ def health():
 def ready():
     """Kubernetes readiness probe: 200 if ready to serve, 503 if not.
 
-    Never returns 500. Always safe to call.
+    GUARANTEED to return 200 or 503, never 500.
+    Hard safety guard wraps entire handler.
     """
     try:
-        from openspace.runtime_state import get_is_ready
-        is_ready = get_is_ready()
-    except Exception:
-        # Any error loading state → not ready (safer than guessing)
-        is_ready = False
+        # Stage 1: Get readiness state (safe by design)
+        try:
+            from openspace.runtime_state import get_is_ready
+            is_ready = get_is_ready()
+        except Exception:
+            # Any import/access error → not ready
+            is_ready = False
 
-    if is_ready:
-        return jsonify({'ready': True, 'reason': None}), 200
-    else:
-        return jsonify({'ready': False, 'reason': 'MCP server not ready or shutting down'}), 503
+        # Stage 2: Try to return JSON response
+        try:
+            if is_ready:
+                return jsonify({'ready': True, 'reason': None}), 200
+            else:
+                return jsonify({'ready': False, 'reason': 'MCP server not ready or shutting down'}), 503
+        except Exception:
+            # If jsonify fails, return plain dict (Flask converts to JSON)
+            if is_ready:
+                return {'ready': True, 'reason': None}, 200
+            else:
+                return {'ready': False, 'reason': 'MCP server not ready or shutting down'}, 503
+
+    except Exception:
+        # Absolute final fallback: hardcoded response, no processing
+        # This should never execute, but prevents any 500 response
+        return Response('{"ready":false,"reason":"internal_error"}', status=503, mimetype='application/json')
 
 @app.route('/status', methods=['GET'])
 def status():
     """Diagnostics endpoint: uptime, initialization state, limiter state, cloud status.
 
-    Never returns 500. Always safe to call with best-effort data.
+    GUARANTEED to return 200, never 500.
+    Hard safety guard wraps entire handler.
     """
-    uptime_seconds = time.time() - _app_startup_time
-
-    # Get MCP server state via lightweight bridge
-    # All getters handle errors gracefully (no exceptions)
     try:
-        from openspace.runtime_state import (
-            get_openspace_initialized,
-            get_execute_task_active,
-            get_search_skills_active,
-            get_cloud_status,
-        )
+        # Stage 1: Get uptime (always safe)
+        uptime_seconds = time.time() - _app_startup_time
 
-        openspace_initialized = get_openspace_initialized()
-        execute_task_active = get_execute_task_active()
-        search_skills_active = get_search_skills_active()
-        cloud_status = get_cloud_status()
-    except Exception:
-        # Fallback to safe defaults if runtime_state import fails
+        # Stage 2: Get MCP server state via lightweight bridge
         openspace_initialized = False
         execute_task_active = 0
         search_skills_active = 0
         cloud_status = 'unknown'
 
-    return jsonify({
-        'uptime_seconds': uptime_seconds,
-        'openspace_initialized': openspace_initialized,
-        'limiter': {
-            'execute_task_active': execute_task_active,
-            'search_skills_active': search_skills_active,
-        },
-        'cloud_status': cloud_status,
-    }), 200
+        try:
+            from openspace.runtime_state import (
+                get_openspace_initialized,
+                get_execute_task_active,
+                get_search_skills_active,
+                get_cloud_status,
+            )
+
+            openspace_initialized = get_openspace_initialized()
+            execute_task_active = get_execute_task_active()
+            search_skills_active = get_search_skills_active()
+            cloud_status = get_cloud_status()
+        except Exception:
+            # Any error loading state → use safe defaults
+            # (already set above)
+            pass
+
+        # Stage 3: Try to return JSON response
+        try:
+            return jsonify({
+                'uptime_seconds': uptime_seconds,
+                'openspace_initialized': openspace_initialized,
+                'limiter': {
+                    'execute_task_active': execute_task_active,
+                    'search_skills_active': search_skills_active,
+                },
+                'cloud_status': cloud_status,
+            }), 200
+        except Exception:
+            # If jsonify fails, return plain dict (Flask converts to JSON)
+            return {
+                'uptime_seconds': uptime_seconds,
+                'openspace_initialized': openspace_initialized,
+                'limiter': {
+                    'execute_task_active': execute_task_active,
+                    'search_skills_active': search_skills_active,
+                },
+                'cloud_status': cloud_status,
+            }, 200
+
+    except Exception:
+        # Absolute final fallback: hardcoded response, no processing
+        return Response('{"uptime_seconds":0,"openspace_initialized":false,"limiter":{"execute_task_active":0,"search_skills_active":0},"cloud_status":"unknown"}', status=200, mimetype='application/json')
 
 @app.route('/platform', methods=['GET'])
 def get_platform():
