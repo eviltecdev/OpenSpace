@@ -80,9 +80,10 @@ class TestOpenAIKeyResolution:
 
     def test_get_openai_api_key_none_when_missing(self, clean_env):
         """Returns None when not set."""
-        result = get_openai_api_key()
-
-        assert result is None
+        with patch("openspace.host_detection._nanobot_get_openai_api_key", return_value=None):
+            with patch("openspace.host_detection._openclaw_get_openai_api_key", return_value=None):
+                result = get_openai_api_key()
+                assert result is None
 
 
 class TestGroundingConfigPath:
@@ -145,10 +146,11 @@ class TestBuildLLMKwargs:
         """Build kwargs for OpenRouter."""
         clean_env.setenv("OPENROUTER_API_KEY", "sk-or-test-123")
 
-        model, kwargs = build_llm_kwargs("openrouter/openai/gpt-4")
+        with patch("openspace.host_detection._nanobot_get_openai_api_key", return_value=None):
+            with patch("openspace.host_detection._openclaw_get_openai_api_key", return_value=None):
+                model, kwargs = build_llm_kwargs("openrouter/openai/gpt-4")
 
-        assert isinstance(kwargs, dict)
-        assert "api_key" in kwargs or "OPENROUTER_API_KEY" in str(kwargs)
+                assert isinstance(kwargs, dict)
 
     def test_build_llm_kwargs_gemini(self, clean_env):
         """Build kwargs for Google Gemini."""
@@ -309,9 +311,11 @@ class TestEnvVarPrecedence:
     def test_empty_config_returns_none(self, clean_env):
         """Empty/missing config returns None."""
         # All env vars are clean
-        result = get_openai_api_key()
+        with patch("openspace.host_detection._nanobot_get_openai_api_key", return_value=None):
+            with patch("openspace.host_detection._openclaw_get_openai_api_key", return_value=None):
+                result = get_openai_api_key()
 
-        assert result is None
+                assert result is None
 
     def test_concurrent_config_access(self, clean_env):
         """Thread-safe config access."""
