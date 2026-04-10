@@ -48,7 +48,7 @@ class TestVideoRecorderInit:
         recorder = VideoRecorder(output_path=temp_output_path)
 
         assert recorder is not None
-        assert recorder._output_path == temp_output_path
+        assert str(recorder.output_path) == temp_output_path
 
     @pytest.mark.asyncio
     async def test_init_custom_url(self, temp_output_path):
@@ -60,7 +60,7 @@ class TestVideoRecorderInit:
         )
 
         assert recorder is not None
-        assert recorder._output_path == temp_output_path
+        assert str(recorder.output_path) == temp_output_path
 
 
 # ============================================================================

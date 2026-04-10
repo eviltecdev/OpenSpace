@@ -212,13 +212,16 @@ class TestSkillRegistration:
     """Test skill registration & auto-discovery."""
 
     @pytest.mark.asyncio
-    async def test_auto_register_skill_dirs_valid_path(self, mock_openspace_engine, mock_skill_store):
+    async def test_auto_register_skill_dirs_valid_path(self, mock_openspace_engine, mock_skill_store, tmp_path):
         """Register skill directory."""
         from openspace.mcp_server import _auto_register_skill_dirs, _get_store
 
+        test_dir = tmp_path / "test_skills"
+        test_dir.mkdir()
+
         with patch("openspace.mcp_server._get_openspace", return_value=mock_openspace_engine):
             with patch("openspace.mcp_server._get_store", return_value=mock_skill_store):
-                skill_dirs = ["/tmp/test_skills"]
+                skill_dirs = [str(test_dir)]
                 count = await _auto_register_skill_dirs(skill_dirs)
 
                 # Should return number of added skills
@@ -247,13 +250,16 @@ class TestSkillRegistration:
             assert count == 0
 
     @pytest.mark.asyncio
-    async def test_auto_register_skill_dirs_db_sync(self, mock_openspace_engine, mock_skill_store):
+    async def test_auto_register_skill_dirs_db_sync(self, mock_openspace_engine, mock_skill_store, tmp_path):
         """DB sync called for new skills."""
         from openspace.mcp_server import _auto_register_skill_dirs
 
+        test_dir = tmp_path / "test"
+        test_dir.mkdir()
+
         with patch("openspace.mcp_server._get_openspace", return_value=mock_openspace_engine):
             with patch("openspace.mcp_server._get_store", return_value=mock_skill_store):
-                await _auto_register_skill_dirs(["/tmp/test"])
+                await _auto_register_skill_dirs([str(test_dir)])
 
                 # store.sync_from_registry should be called
                 assert mock_skill_store.sync_from_registry.called
@@ -564,10 +570,18 @@ class TestErrorHandling:
         assert result.get("status") == "rate_limited"
         assert "Rate limit exceeded" in result.get("error", "")
 
+        # Reset for next test
+        execute_task_limiter.active_tasks = 0
+
     @pytest.mark.asyncio
     async def test_execute_task_openspace_init_failure(self, isolated_globals, rate_limiter_reset):
         """Handle OpenSpace initialization failure."""
         from openspace.mcp_server import execute_task
+        from openspace.mcp_server_limiter import execute_task_limiter
+
+        # Reset limiter state
+        execute_task_limiter.active_tasks = 0
+        execute_task_limiter.request_times = []
 
         # Mock _get_openspace to raise exception
         with patch("openspace.mcp_server._get_openspace", side_effect=Exception("Init failed")):
@@ -581,6 +595,11 @@ class TestErrorHandling:
     async def test_execute_task_cloud_client_unavailable(self, isolated_globals, rate_limiter_reset, mock_openspace_engine):
         """Gracefully degrade when cloud client unavailable."""
         from openspace.mcp_server import execute_task
+        from openspace.mcp_server_limiter import execute_task_limiter
+
+        # Reset limiter state
+        execute_task_limiter.active_tasks = 0
+        execute_task_limiter.request_times = []
 
         with patch("openspace.mcp_server._get_openspace", return_value=mock_openspace_engine):
             with patch("openspace.mcp_server._get_cloud_client", side_effect=Exception("Cloud unavailable")):
@@ -595,6 +614,11 @@ class TestErrorHandling:
     async def test_execute_task_invalid_workspace_dir(self, isolated_globals, rate_limiter_reset, mock_openspace_engine):
         """Handle invalid workspace directory."""
         from openspace.mcp_server import execute_task
+        from openspace.mcp_server_limiter import execute_task_limiter
+
+        # Reset limiter state
+        execute_task_limiter.active_tasks = 0
+        execute_task_limiter.request_times = []
 
         with patch("openspace.mcp_server._get_openspace", return_value=mock_openspace_engine):
             result_str = await execute_task("test", workspace_dir="/invalid/path/that/does/not/exist")
@@ -637,6 +661,11 @@ class TestExecuteTaskIntegration:
     async def test_execute_task_full_workflow(self, isolated_globals, rate_limiter_reset, mock_openspace_engine):
         """Full execute_task workflow with mocked dependencies."""
         from openspace.mcp_server import execute_task
+        from openspace.mcp_server_limiter import execute_task_limiter
+
+        # Reset limiter state
+        execute_task_limiter.active_tasks = 0
+        execute_task_limiter.request_times = []
 
         with patch("openspace.mcp_server._get_openspace", return_value=mock_openspace_engine):
             with patch("openspace.mcp_server._auto_register_skill_dirs", return_value=5):
@@ -656,6 +685,11 @@ class TestExecuteTaskIntegration:
     async def test_execute_task_with_skill_dirs(self, isolated_globals, rate_limiter_reset, mock_openspace_engine):
         """Auto-register skill directories."""
         from openspace.mcp_server import execute_task
+        from openspace.mcp_server_limiter import execute_task_limiter
+
+        # Reset limiter state
+        execute_task_limiter.active_tasks = 0
+        execute_task_limiter.request_times = []
 
         with patch("openspace.mcp_server._get_openspace", return_value=mock_openspace_engine):
             with patch("openspace.mcp_server._auto_register_skill_dirs", return_value=3):
@@ -672,6 +706,10 @@ class TestExecuteTaskIntegration:
         """Rate limiter released even on error."""
         from openspace.mcp_server import execute_task
         from openspace.mcp_server_limiter import execute_task_limiter
+
+        # Reset limiter state
+        execute_task_limiter.active_tasks = 0
+        execute_task_limiter.request_times = []
 
         initial_active = execute_task_limiter.active_tasks
 

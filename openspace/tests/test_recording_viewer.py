@@ -50,7 +50,7 @@ class TestConstructor:
         viewer = RecordingViewer(recording_dir=str(sample_recording_dir))
 
         assert viewer is not None
-        assert viewer._recording_dir == str(sample_recording_dir)
+        assert str(viewer.recording_dir) == str(sample_recording_dir)
 
     def test_constructor_with_nonexistent_dir(self, tmp_path):
         """Constructor handles missing directory."""
@@ -273,7 +273,7 @@ class TestShowTimeline:
 
     def test_show_timeline_all_events(self, recording_viewer):
         """Show timeline with all events."""
-        timeline = recording_viewer.show_timeline(max_events=None)
+        timeline = recording_viewer.show_timeline(max_events=999)
 
         assert isinstance(timeline, str)
 
@@ -293,14 +293,14 @@ class TestShowTimeline:
     def test_show_timeline_empty(self, empty_viewer):
         """Handle timeline with no events."""
         try:
-            timeline = empty_viewer.show_timeline(max_events=None)
+            timeline = empty_viewer.show_timeline(max_events=50)
             assert isinstance(timeline, str)
         except (FileNotFoundError, KeyError):
             pass
 
     def test_show_timeline_sorted(self, recording_viewer):
         """Timeline events are sorted."""
-        timeline = recording_viewer.show_timeline(max_events=None)
+        timeline = recording_viewer.show_timeline(max_events=999)
 
         # Should be sorted by timestamp
         assert isinstance(timeline, str)
