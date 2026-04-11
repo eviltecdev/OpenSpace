@@ -10,9 +10,16 @@ from typing import Any, Dict, Iterable, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-from flask import Flask, abort, jsonify, request, send_from_directory, url_for
+from flask import Flask, abort, jsonify, request, send_from_directory, url_for, g
 
 from openspace.recording.action_recorder import analyze_agent_actions, load_agent_actions
+from openspace.metrics.prometheus import (
+    http_requests_total,
+    http_request_duration_seconds,
+    record_exception,
+    record_request,
+    normalize_endpoint,
+)
 from openspace.recording.utils import load_recording_session
 from openspace.skill_engine import SkillStore
 from openspace.skill_engine.types import SkillRecord
@@ -136,6 +143,61 @@ def create_app() -> Flask:
             _record_failed_auth(client_ip)
             return jsonify({"error": "Unauthorized"}), 401
         return None
+
+    @app.before_request
+    def _before_request_metrics() -> None:
+        """Record request start time and compute normalized endpoint."""
+        g.start_time = time.time()
+
+        # Compute normalized endpoint once, reuse in after_request and error handler
+        g.metric_endpoint = normalize_endpoint(
+            request.path,
+            getattr(request.url_rule, 'rule', None),
+        )
+
+    @app.after_request
+    def _after_request_metrics(response):
+        """Record request duration and status code metrics."""
+        try:
+            if hasattr(g, 'start_time'):
+                duration = time.time() - g.start_time
+                method = request.method
+                status = response.status_code
+                endpoint = getattr(
+                    g,
+                    'metric_endpoint',
+                    normalize_endpoint(
+                        request.path,
+                        getattr(request.url_rule, 'rule', None),
+                    ),
+                )
+
+                # Record metrics (endpoint already normalized in before_request, or via fallback)
+                record_request(endpoint, method, status, duration)
+        except Exception:
+            # Silently ignore metrics errors to avoid breaking requests
+            pass
+
+        return response
+
+    @app.errorhandler(Exception)
+    def _handle_exception(e):
+        """Record exception metrics and re-raise."""
+        try:
+            endpoint = getattr(
+                g,
+                'metric_endpoint',
+                normalize_endpoint(
+                    request.path,
+                    getattr(request.url_rule, 'rule', None),
+                ),
+            )
+            record_exception(endpoint, type(e).__name__)
+        except Exception:
+            # Silently ignore metrics errors
+            pass
+
+        raise
 
     @app.route(f"{API_PREFIX}/health", methods=["GET"])
     def health() -> Any:

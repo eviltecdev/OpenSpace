@@ -30,6 +30,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from openspace.metrics.prometheus import openspace_active_tasks
+
 # Request correlation ID for end-to-end tracing
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     'request_id', default=''
@@ -683,6 +685,13 @@ async def execute_task(
         )
 
     try:
+        # Update active task count metric
+        try:
+            current_count = execute_task_limiter.active_tasks
+            openspace_active_tasks.set(current_count)
+        except Exception as e:
+            logger.warning(f"Failed to update active tasks metric: {e}")
+
         openspace = await _get_openspace()
 
         # Re-scan host skill directories (from env) to pick up skills
@@ -762,6 +771,13 @@ async def execute_task(
         # Only release if acquire() succeeded (idempotent guard)
         if acquire_succeeded:
             await execute_task_limiter.release()
+
+            # Update active task count metric after release
+            try:
+                current_count = execute_task_limiter.active_tasks
+                openspace_active_tasks.set(current_count)
+            except Exception as e:
+                logger.warning(f"Failed to update active tasks metric on release: {e}")
 
 
 @mcp.tool()

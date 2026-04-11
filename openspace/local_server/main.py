@@ -6,14 +6,26 @@ import signal
 import time
 import json
 import uuid
+import asyncio
 from datetime import datetime
-from flask import Flask, request, jsonify, send_file, abort, Response
+from flask import Flask, request, jsonify, send_file, abort, Response, g
 import pyautogui
 import threading
 from io import BytesIO
 import tempfile
 
 from openspace.utils.logging import Logger
+from openspace.metrics.prometheus import (
+    http_requests_total,
+    http_request_duration_seconds,
+    http_exceptions_total,
+    openspace_readiness,
+    openspace_active_tasks,
+    record_exception,
+    record_request,
+    normalize_endpoint,
+)
+from openspace.runtime_state import get_execute_task_active
 from openspace.local_server.utils import AccessibilityHelper, ScreenshotHelper
 from openspace.local_server.platform_adapters import get_platform_adapter
 from openspace.local_server.health_checker import HealthChecker
@@ -179,6 +191,71 @@ fi
 health_checker = None
 _app_startup_time = time.time()
 
+
+# Prometheus instrumentation hooks
+@app.before_request
+def before_request():
+    """Record request start time and compute normalized endpoint."""
+    g.start_time = time.time()
+
+    # Compute normalized endpoint once, reuse in after_request and error handler
+    g.metric_endpoint = normalize_endpoint(
+        request.path,
+        getattr(request.url_rule, 'rule', None),
+    )
+
+    # Update active task count gauge
+    try:
+        active_tasks = get_execute_task_active()
+        openspace_active_tasks.set(active_tasks)
+    except Exception as e:
+        logger.warning(f"Failed to update active task count metric: {e}")
+
+
+@app.after_request
+def after_request(response):
+    """Record request duration and status code metrics."""
+    try:
+        if hasattr(g, 'start_time'):
+            duration = time.time() - g.start_time
+            method = request.method
+            status = response.status_code
+            endpoint = getattr(
+                g,
+                'metric_endpoint',
+                normalize_endpoint(
+                    request.path,
+                    getattr(request.url_rule, 'rule', None),
+                ),
+            )
+
+            # Record metrics (endpoint already normalized in before_request, or via fallback)
+            record_request(endpoint, method, status, duration)
+    except Exception as e:
+        logger.warning(f"Failed to record request metrics: {e}")
+
+    return response
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Record exception metrics and re-raise."""
+    try:
+        endpoint = getattr(
+            g,
+            'metric_endpoint',
+            normalize_endpoint(
+                request.path,
+                getattr(request.url_rule, 'rule', None),
+            ),
+        )
+        record_exception(endpoint, type(e).__name__)
+    except Exception as metric_error:
+        logger.warning(f"Failed to record exception metric: {metric_error}")
+
+    raise
+
+
 @app.route('/', methods=['GET'])
 def health_check():
     """Health check interface - return features information"""
@@ -219,7 +296,13 @@ def ready():
             # Any import/access error → not ready
             is_ready = False
 
-        # Stage 2: Try to return JSON response
+        # Stage 2: Update readiness gauge
+        try:
+            openspace_readiness.set(1 if is_ready else 0)
+        except Exception as e:
+            logger.warning(f"Failed to update readiness gauge: {e}")
+
+        # Stage 3: Try to return JSON response
         try:
             if is_ready:
                 return jsonify({'ready': True, 'reason': None}), 200
@@ -298,6 +381,27 @@ def status():
         # Absolute final fallback: hardcoded response, no processing
         return Response('{"uptime_seconds":0,"openspace_initialized":false,"limiter":{"execute_task_active":0,"search_skills_active":0},"cloud_status":"unknown"}', status=200, mimetype='application/json')
 
+
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """Prometheus metrics endpoint.
+
+    Exposes all collected metrics in Prometheus text format.
+    """
+    try:
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+
+        return Response(
+            generate_latest(),
+            mimetype=CONTENT_TYPE_LATEST
+        )
+    except Exception as e:
+        logger.error(f"Failed to generate metrics: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Failed to generate metrics'
+        }), 500
+
 @app.route('/platform', methods=['GET'])
 def get_platform():
     info = {
@@ -313,33 +417,27 @@ def get_platform():
     
     return jsonify(info)
 
-@app.route('/execute', methods=['POST'])
-@app.route('/setup/execute', methods=['POST'])
-def execute_command():
-    data = request.json
-    # The 'command' key in the JSON request should contain the command to be executed.
-    shell = data.get('shell', False)
+def _execute_shell(command, timeout: int = 120) -> dict:
+    """Execute a shell command synchronously.
 
-    # Reject shell=True to prevent shell injection attacks.
-    # All commands must be provided as list arguments, never as shell strings.
-    if shell:
-        return jsonify({
-            'status': 'error',
-            'message': 'shell=True is not allowed. Provide command as a list of arguments.'
-        }), 400
+    Args:
+        command: Command as string or list
+        timeout: Timeout in seconds
 
-    command = data.get('command', [])
-    timeout = data.get('timeout', 120)
-    
-    if isinstance(command, str) and not shell:
+    Returns:
+        Dict with status, output, error, returncode
+    """
+    shell = False  # Always false for security (no shell=True allowed)
+
+    if isinstance(command, str):
         command = shlex.split(command)
-    
+
     # Expand user directory
     if isinstance(command, list):
         for i, arg in enumerate(command):
             if arg.startswith("~/"):
                 command[i] = os.path.expanduser(arg)
-    
+
     try:
         if platform_name == "Windows":
             result = subprocess.run(
@@ -360,23 +458,151 @@ def execute_command():
                 text=True,
                 timeout=timeout,
             )
-        
-        return jsonify({
+
+        return {
             'status': 'success',
             'output': result.stdout,
             'error': result.stderr,
             'returncode': result.returncode
-        })
+        }
     except subprocess.TimeoutExpired:
-        return jsonify({
+        return {
             'status': 'error',
             'message': f'Command timeout after {timeout} seconds'
-        }), 408
+        }
     except Exception as e:
-        return jsonify({
+        return {
             'status': 'error',
             'message': str(e)
-        }), 500
+        }
+
+
+async def _execute_task_async(task: str, task_input: dict, timeout: int = 120) -> dict:
+    """Execute a structured task asynchronously.
+
+    Args:
+        task: Task name (e.g., "list_directory", "read_file")
+        task_input: Task input parameters as dict
+        timeout: Timeout in seconds (not enforced at this layer)
+
+    Returns:
+        Dict with status and result or error
+    """
+    try:
+        from openspace.mcp_server import execute_task
+
+        # execute_task expects a task description string.
+        # For now, we'll pass the task name and input as a formatted instruction.
+        task_instruction = f"Execute task: {task}\nInput: {json.dumps(task_input)}"
+
+        result_str = await execute_task(task_instruction)
+
+        # Try to parse the result as JSON
+        try:
+            result = json.loads(result_str)
+            return {
+                'status': 'success',
+                'result': result
+            }
+        except json.JSONDecodeError:
+            return {
+                'status': 'success',
+                'result': result_str
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': str(e)
+        }
+
+
+def _execute_task_sync(task: str, task_input: dict, timeout: int = 120) -> dict:
+    """Execute a structured task synchronously (wrapper for async).
+
+    Args:
+        task: Task name
+        task_input: Task input parameters
+        timeout: Timeout in seconds
+
+    Returns:
+        Dict with status and result or error
+    """
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(_execute_task_async(task, task_input, timeout))
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': str(e)
+        }
+    finally:
+        loop.close()
+
+
+@app.route('/execute', methods=['POST'])
+@app.route('/setup/execute', methods=['POST'])
+def execute_command():
+    """Execute shell command or structured task based on type field.
+
+    Request formats:
+    - Shell: {"type": "shell", "command": "...", "timeout": 120}
+    - Task: {"type": "task", "task": "list_directory", "input": {...}, "timeout": 120}
+    """
+    data = request.json
+    if not data:
+        return jsonify({
+            'status': 'error',
+            'message': 'Request body must be JSON'
+        }), 400
+
+    # Check for deprecated behavior (missing type field)
+    request_type = data.get('type')
+    if request_type is None:
+        logger.warning(
+            "Deprecated: /execute request missing 'type' field. "
+            "Defaulting to 'shell'. This will be required in a future version. "
+            "Use type='shell' or type='task' explicitly."
+        )
+        request_type = 'shell'
+
+    timeout = data.get('timeout', 120)
+
+    if request_type == 'shell':
+        # Reject shell=True parameter for security
+        if data.get('shell', False):
+            return jsonify({
+                'status': 'error',
+                'message': 'shell=True is not allowed. Commands must be provided as arguments.'
+            }), 400
+
+        command = data.get('command', [])
+        result = _execute_shell(command, timeout=timeout)
+
+        if result.get('status') == 'error':
+            return jsonify(result), 500
+        return jsonify(result), 200
+
+    elif request_type == 'task':
+        task = data.get('task')
+        if not task:
+            return jsonify({
+                'status': 'error',
+                'message': 'task field is required for type=task'
+            }), 400
+
+        task_input = data.get('input', {})
+        result = _execute_task_sync(task, task_input, timeout=timeout)
+
+        if result.get('status') == 'error':
+            return jsonify(result), 500
+        return jsonify(result), 200
+
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': f'Unknown type: {request_type}. Supported: shell, task'
+        }), 400
 
 @app.route('/execute_with_verification', methods=['POST'])
 @app.route('/setup/execute_with_verification', methods=['POST'])

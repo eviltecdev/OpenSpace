@@ -8,12 +8,22 @@ from typing import Optional
 logger = logging.getLogger("openspace.mcp_server_limiter")
 
 
+def _get_limiter_rejection_metric():
+    """Get the limiter rejection metric counter (lazy import to avoid circular deps)."""
+    try:
+        from openspace.metrics.prometheus import openspace_limiter_rejections_total
+        return openspace_limiter_rejections_total
+    except ImportError:
+        return None
+
+
 class RateLimiter:
     """Token bucket rate limiter with idempotent release semantics."""
 
-    def __init__(self, max_concurrent: int = 3, max_per_minute: int = 10):
+    def __init__(self, max_concurrent: int = 3, max_per_minute: int = 10, limiter_type: str = "unknown"):
         self.max_concurrent = max_concurrent
         self.max_per_minute = max_per_minute
+        self.limiter_type = limiter_type
         self.active_tasks = 0
         self.request_times = []
         self._lock = asyncio.Lock()
@@ -30,6 +40,10 @@ class RateLimiter:
                     f"Rate limit: max concurrent ({self.max_concurrent}) exceeded. "
                     f"Current tasks: {self.active_tasks}"
                 )
+                # Record rejection metric
+                metric = _get_limiter_rejection_metric()
+                if metric:
+                    metric.labels(limiter_type=self.limiter_type).inc()
                 return False
 
             now = time.time()
@@ -41,6 +55,10 @@ class RateLimiter:
                     f"Rate limit: max per minute ({self.max_per_minute}) exceeded. "
                     f"Current requests in last minute: {len(self.request_times)}"
                 )
+                # Record rejection metric
+                metric = _get_limiter_rejection_metric()
+                if metric:
+                    metric.labels(limiter_type=self.limiter_type).inc()
                 return False
 
             self.active_tasks += 1
@@ -60,5 +78,5 @@ class RateLimiter:
 
 
 # Global limiters
-execute_task_limiter = RateLimiter(max_concurrent=3, max_per_minute=10)
-search_skills_limiter = RateLimiter(max_concurrent=5, max_per_minute=20)
+execute_task_limiter = RateLimiter(max_concurrent=3, max_per_minute=10, limiter_type="execute_task")
+search_skills_limiter = RateLimiter(max_concurrent=5, max_per_minute=20, limiter_type="search_skills")
