@@ -77,3 +77,4 @@ node_modules/
 # Frontend local dependency link
 frontend/node_modules
 showcase/my-daily-monitor/.env
+.gitnexus
