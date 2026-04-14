@@ -2,6 +2,10 @@
 
 Wird vom LLMClient nach jedem API-Call aufgerufen.
 Die Statusleiste liest daraus.
+
+PHASE-2 INTEGRATION: Also records costs to Phase-2 independent tracker
+via cost-tracker-phase2.js. This makes Phase-2 a true independent
+recorder that mirrors OpenSpace cost data in real-time.
 """
 
 from __future__ import annotations
@@ -9,6 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
@@ -19,6 +25,8 @@ _CACHE_DIR = Path("/tmp/openspace/costs")
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _ALERT_THRESHOLD = float(os.environ.get("OPENSPACE_COST_ALERT_THRESHOLD", "5.0"))
+_PHASE2_TRACKER = Path("/home/claude/.claude/helpers/cost-tracker-phase2.js")
+_PHASE2_METRICS = Path("/tmp/phase2_costs/metrics.json")
 
 _OPENAI_PREFIXES = ("openai", "gpt", "o1", "o3")
 _ANTHROPIC_PREFIXES = ("anthropic", "claude")
@@ -53,6 +61,106 @@ def _detect_provider(model: str) -> Optional[str]:
     if any(p in model_lower for p in _ANTHROPIC_PREFIXES):
         return "anthropic"
     return None
+
+
+def _update_phase2_metrics(
+    outcome: str, attempt: int = 1, cost: float = 0.0
+) -> None:
+    """Update Phase-2 dual-write telemetry (non-fatal).
+
+    Outcomes: "attempt", "success_first", "success_retry", "failed"
+    """
+    try:
+        data = {"total_attempts": 0, "success_first_try": 0, "success_after_retry": 0, "failed_after_retries": 0}
+        if _PHASE2_METRICS.exists():
+            try:
+                data = json.loads(_PHASE2_METRICS.read_text())
+            except Exception:
+                pass
+
+        data["total_attempts"] = data.get("total_attempts", 0) + 1
+
+        if outcome == "success_first":
+            data["success_first_try"] = data.get("success_first_try", 0) + 1
+        elif outcome == "success_retry":
+            data["success_after_retry"] = data.get("success_after_retry", 0) + 1
+        elif outcome == "failed":
+            data["failed_after_retries"] = data.get("failed_after_retries", 0) + 1
+
+        data["last_updated"] = date.today().isoformat()
+        _PHASE2_METRICS.write_text(json.dumps(data))
+    except Exception:
+        pass
+
+
+def _record_to_phase2(model: str, cost: float, provider: str) -> None:
+    """Records cost to Phase-2 independent tracker (non-blocking, non-fatal, with retries).
+
+    This makes Phase-2 a true independent recorder that mirrors OpenSpace
+    cost data in real-time, decoupling it from file sync dependency.
+
+    Uses retry logic to increase reliability, but failures remain non-fatal
+    for OpenSpace. The sync job provides safety net for any silent divergences.
+    """
+    if not _PHASE2_TRACKER.exists() or cost <= 0:
+        return
+
+    cmd = [
+        "node",
+        str(_PHASE2_TRACKER),
+        "record",
+        "--model", model,
+        "--cost", str(round(cost, 6)),
+        "--provider", provider,
+    ]
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            result = subprocess.run(
+                cmd, timeout=5, capture_output=True, check=False, text=True
+            )
+            if result.returncode == 0:
+                logger.debug(
+                    "Phase-2 recorded (attempt %d): model=%s cost=$%.6f",
+                    attempt, model, cost,
+                )
+                # Track successful write
+                outcome = "success_first" if attempt == 1 else "success_retry"
+                _update_phase2_metrics(outcome, attempt, cost)
+                return
+        except subprocess.TimeoutExpired:
+            if attempt < max_retries:
+                logger.debug(
+                    "Phase-2 timeout on attempt %d (retrying): model=%s",
+                    attempt, model,
+                )
+                time.sleep(0.1 * attempt)  # 100ms, 200ms, 300ms backoff
+                continue
+            else:
+                logger.warning(
+                    "Phase-2 write FAILED after %d attempts (timeout): "
+                    "model=%s cost=$%.6f provider=%s — sync job will correct",
+                    max_retries, model, cost, provider,
+                )
+                _update_phase2_metrics("failed", max_retries, cost)
+                return
+        except Exception as e:
+            if attempt < max_retries:
+                logger.debug(
+                    "Phase-2 error on attempt %d (retrying): %s",
+                    attempt, str(e)[:100],
+                )
+                time.sleep(0.1 * attempt)
+                continue
+            else:
+                logger.warning(
+                    "Phase-2 write FAILED after %d attempts (exception): "
+                    "model=%s cost=$%.6f provider=%s error=%s — sync job will correct",
+                    max_retries, model, cost, provider, str(e)[:100],
+                )
+                _update_phase2_metrics("failed", max_retries, cost)
+                return
 
 
 def record_cost(response: Any, model: str) -> Optional[float]:
@@ -118,6 +226,9 @@ def record_cost(response: Any, model: str) -> Optional[float]:
     if provider is None:
         logger.debug("Unknown provider for model=%s — cost not tracked", model)
         return cost
+
+    # Record to Phase-2 independent tracker (parallel, non-blocking)
+    _record_to_phase2(model, cost, provider)
 
     data = _load_cache(provider)
     data["total"] = round(data.get("total", 0.0) + cost, 6)

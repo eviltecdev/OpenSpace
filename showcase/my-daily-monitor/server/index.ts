@@ -19,6 +19,7 @@ import { handleFeishuRequest } from './routes/feishu';
 import { handleSocialRequest } from './routes/social';
 import { handleVisionRequest } from './routes/vision';
 import { handleCostsRequest } from './routes/costs';
+import { handleCostsPhase2Request } from './routes/costs-phase2';
 
 const PORT = Number(process.env.API_PORT || 3001);
 
@@ -34,6 +35,7 @@ const routes: Record<string, RouteHandler> = {
   '/api/social': handleSocialRequest,
   '/api/vision': handleVisionRequest,
   '/api/costs': handleCostsRequest,
+  '/api/costs-debug': handleCostsPhase2Request,
 };
 
 const server = http.createServer(async (req, res) => {

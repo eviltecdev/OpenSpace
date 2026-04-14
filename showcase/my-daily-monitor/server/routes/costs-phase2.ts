@@ -1,15 +1,22 @@
 /**
- * Costs route — liest Phase-2 LLM-Kosten aus /tmp/phase2_costs/
- * GET /api/costs
+ * Costs Phase-2 Shadow Route — reads Phase-2 mirror costs from /tmp/phase2_costs/
+ * GET /api/costs-debug
  *
- * SWITCHED FROM OpenSpace: Now reads Phase-2 tracked costs instead.
- * OpenSpace path for rollback: '/tmp/openspace/costs'
+ * This is a SHADOW/DEBUG endpoint for validation purposes.
+ * It reads the same cost data structure but from the Phase-2 tracker (/tmp/phase2_costs/)
+ * instead of OpenSpace (/tmp/openspace/costs/).
+ *
+ * Purpose:
+ * - Parallel validation of Phase-2 cost tracking
+ * - Compare OpenSpace vs Phase-2 costs side-by-side
+ * - No production UI changes required
+ * - Fully reversible (just delete endpoint)
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertPathAllowed } from '../path-jail';
 
-const COSTS_DIR = '/tmp/phase2_costs';
+const COSTS_DIR_PHASE2 = '/tmp/phase2_costs';
 
 interface ProviderData {
   total: number;
@@ -23,10 +30,11 @@ interface CostSummary {
   calls: number;
   by_provider: Record<string, ProviderData>;
   models: Record<string, number>;
+  source: 'phase2-shadow';
 }
 
 function readProviderFile(provider: string, date: string): ProviderData | null {
-  const path = join(COSTS_DIR, `${provider}-daily-costs-${date}.json`);
+  const path = join(COSTS_DIR_PHASE2, `${provider}-daily-costs-${date}.json`);
   assertPathAllowed(path);
   if (!existsSync(path)) return null;
   try {
@@ -40,7 +48,7 @@ function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export async function handleCostsRequest(
+export async function handleCostsPhase2Request(
   query: Record<string, string>,
 ): Promise<unknown> {
   const date = query.date || todayStr();
@@ -85,6 +93,7 @@ export async function handleCostsRequest(
     calls: totalCalls,
     by_provider,
     models: allModels,
+    source: 'phase2-shadow',
   };
 
   return { summary, history };

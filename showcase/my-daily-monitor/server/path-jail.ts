@@ -15,6 +15,7 @@ const ALLOWED_DIRS = [
   `/tmp/openspace`,
   `/tmp/agent-output`,
   `/tmp/openai-daily-costs`,
+  `/tmp/phase2_costs`,
   `${HOME}/.openclaw/agents/main/sessions`,
   `${HOME}/.openclaw/logs`,
 ];
