@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 import pytest
 
 from openspace.agents.grounding_agent import GroundingAgent
+from openspace.agents.message_utils import cap_message_content, truncate_messages
 from openspace.grounding.core.types import BackendType, ToolResult, ToolStatus
 from openspace.agents.base import BaseAgent
 
@@ -90,12 +91,11 @@ def grounding_agent():
     agent.step = 1
     agent.has_skill_context = False
 
-    # Add real methods
+    # Add real methods from GroundingAgent class
     agent.set_skill_context = GroundingAgent.set_skill_context.__get__(agent)
     agent.clear_skill_context = GroundingAgent.clear_skill_context.__get__(agent)
-    agent._cap_message_content = GroundingAgent._cap_message_content.__get__(agent)
-    agent._truncate_messages = GroundingAgent._truncate_messages.__get__(agent)
-    agent.set_skill_registry = GroundingAgent.set_skill_registry.__get__(agent)
+    if hasattr(GroundingAgent, 'set_skill_registry'):
+        agent.set_skill_registry = GroundingAgent.set_skill_registry.__get__(agent)
 
     return agent
 
@@ -153,7 +153,7 @@ class TestMessageManagement:
             {"role": "assistant", "content": large_content},
         ]
 
-        capped = GroundingAgent._cap_message_content(messages)
+        capped = cap_message_content(messages)
 
         # Assistant message should be capped
         assert len(capped[1]["content"]) < 50_000
@@ -166,7 +166,7 @@ class TestMessageManagement:
             {"role": "assistant", "content": "Short response"},
         ]
 
-        capped = GroundingAgent._cap_message_content(messages)
+        capped = cap_message_content(messages)
 
         assert capped == messages
 
@@ -178,8 +178,8 @@ class TestMessageManagement:
             role = "user" if i % 2 == 0 else "assistant"
             messages.append({"role": role, "content": f"Message {i}"})
 
-        # Use real GroundingAgent class method
-        truncated = GroundingAgent._cap_message_content(messages)
+        # Use real truncate_messages function
+        truncated = truncate_messages(messages, keep_recent=8)
 
         # Should be same or shorter
         assert len(truncated) <= len(messages)
@@ -196,7 +196,7 @@ class TestMessageManagement:
         ]
 
         # Use real method
-        capped = GroundingAgent._cap_message_content(messages)
+        capped = cap_message_content(messages)
 
         # Should keep all messages (small content)
         assert len(capped) == len(messages)

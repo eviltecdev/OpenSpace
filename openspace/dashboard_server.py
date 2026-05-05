@@ -182,7 +182,9 @@ def create_app() -> Flask:
 
     @app.errorhandler(Exception)
     def _handle_exception(e):
-        """Record exception metrics and re-raise."""
+        """Record exception metrics and handle appropriately."""
+        from werkzeug.exceptions import HTTPException
+
         try:
             endpoint = getattr(
                 g,
@@ -197,6 +199,11 @@ def create_app() -> Flask:
             # Silently ignore metrics errors
             pass
 
+        # Let Flask handle HTTPExceptions (abort, 404, 401, etc.)
+        if isinstance(e, HTTPException):
+            return e
+
+        # Re-raise other exceptions for Flask's error handler
         raise
 
     @app.route(f"{API_PREFIX}/health", methods=["GET"])
