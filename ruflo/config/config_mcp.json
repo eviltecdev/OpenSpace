@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "websearch": {
+      "command": "python3",
+      "args": ["/home/claude/.openclaw/mcp-servers/websearch/server.py"]
+    }
+  }
+}

@@ -1,32 +1,21 @@
-from .grounding import *
-from .loader import *
-from .constants import * 
-from .utils import *
-from . import constants
+"""OpenSpace config — DEPRECATED, use ruflo.config instead."""
+# Lazy imports to avoid circular deps
+def __getattr__(name):
+    if name == "get_config":
+        from ruflo.config.loader import get_config
+        return get_config
+    elif name == "load_config":
+        from ruflo.config.loader import load_config
+        return load_config
+    elif name == "OpenSpaceConfig":
+        from ruflo.config.types import OpenSpaceConfig
+        return OpenSpaceConfig
+    elif name == "GroundingConfig":
+        from ruflo.config.types import GroundingConfig
+        return GroundingConfig
+    elif name == "constants":
+        from ruflo.config import constants
+        return constants
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    # Grounding Config
-    "BackendConfig",
-    "ShellConfig",
-    "WebConfig",
-    "MCPConfig",
-    "GUIConfig",
-    "ToolSearchConfig",
-    "SessionConfig",
-    "SecurityPolicy",
-    "GroundingConfig",
-    
-    # Loader
-    "CONFIG_DIR",
-    "load_config",
-    "get_config",
-    "reset_config",
-    "save_config",
-    "load_agents_config",
-    "get_agent_config",
-    
-    # Utils
-    "get_config_value",
-    "load_json_file",
-    "save_json_file",
-] + constants.__all__
+__all__ = ["get_config", "load_config", "OpenSpaceConfig", "GroundingConfig"]
