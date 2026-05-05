@@ -8,10 +8,10 @@ def __getattr__(name):
         from ruflo.config.loader import load_config
         return load_config
     elif name == "OpenSpaceConfig":
-        from ruflo.config.types import OpenSpaceConfig
+        from ruflo.config.loader import OpenSpaceConfig
         return OpenSpaceConfig
     elif name == "GroundingConfig":
-        from ruflo.config.types import GroundingConfig
+        from ruflo.config.grounding import GroundingConfig
         return GroundingConfig
     elif name == "constants":
         from ruflo.config import constants
